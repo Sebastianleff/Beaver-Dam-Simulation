@@ -4,3 +4,10 @@ from dataclasses import dataclass
 
 
 @dataclass
+class SimulationStep:
+
+
+@dataclass
+class SimParam:
+
+
