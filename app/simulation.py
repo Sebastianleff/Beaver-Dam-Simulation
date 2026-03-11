@@ -10,4 +10,5 @@ class SimulationStep:
 @dataclass
 class SimParam:
 
-
+@dataclass
+class RiverNode:
