@@ -1,14 +1,6 @@
 """Code for the simulation engine"""
 
-from dataclasses import dataclass
 
+class RiverNetwork:
 
-@dataclass
-class SimulationStep:
-
-
-@dataclass
-class SimParam:
-
-@dataclass
-class RiverNode:
+class Simulation:
