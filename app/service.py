@@ -4,7 +4,7 @@ from typing import List, Optional
 import csv
 import random
 
-# ----- Data classes -----
+# Data classes 
 @dataclass
 class SimParam:
     dam_creation_prob: float
@@ -23,7 +23,7 @@ class SimulationStep:
     dams_state: dict   # Replace with dam info
 
 
-# ----- Validation Service -----
+# Validation Service 
 class ValidationService:
     @staticmethod
     def validate_params(params: SimParam) -> bool:
@@ -43,7 +43,7 @@ class ValidationService:
         return True
 
 
-# ----- CSV Service -----
+# CSV Service 
 class CSVService:
     @staticmethod
     def load_sim_params(file_path: str) -> List[SimParam]:
@@ -81,7 +81,7 @@ class CSVService:
                 })
 
 
-# ----- RiverNetwork Factory -----
+# RiverNetwork Factory 
 class RiverNetworkFactory:
     @staticmethod
     def create_network(num_nodes: int):
@@ -93,7 +93,7 @@ class RiverNetworkFactory:
         return network
 
 
-# ----- Simulation Service -----
+# Simulation Service 
 class SimulationService:
     def __init__(self):
         self.validation_service = ValidationService()
