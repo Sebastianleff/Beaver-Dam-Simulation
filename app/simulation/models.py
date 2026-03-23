@@ -8,16 +8,16 @@ from typing import ClassVar
 class RiverNetwork:
     """A directed graph representing a river network."""
 
-    Nodes: list[RiverNode]
-    Edges: list[RiverEdge]
+    nodes: list[RiverNode]
+    edges: list[RiverEdge]
 
     def add_node(self) -> None:
         """Add a new node to the graph."""
-        self.Nodes.append(RiverNode())
+        self.nodes.append(RiverNode())
 
     def add_edge(self, down_stream_node, up_stream_node) -> None:
         """Add an edge to the graph and connect it nodes."""
-        self.Edges.append(RiverEdge(down_stream_node, up_stream_node))
+        self.edges.append(RiverEdge(down_stream_node, up_stream_node))
 
 
 @dataclass
