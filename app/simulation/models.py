@@ -56,7 +56,7 @@ class SimulationStep:
 
         broken_dams: list[Dam] = []
 
-        for edge in self.river_snapshot.get_edges():
+        for edge in self.river_snapshot.edges:
             for cell in edge.cells:
                 if cell.dam.is_broken:
                     if cell.dam.broken_year == self.year:
@@ -70,7 +70,7 @@ class SimulationStep:
 
         created_dams: list[Dam] = []
 
-        for edge in self.river_snapshot.get_edges():
+        for edge in self.river_snapshot.edges:
             for cell in edge.cells:
                 if not cell.dam.is_broken:
                     if cell.dam.create_year == self.year:
