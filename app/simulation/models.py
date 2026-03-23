@@ -5,6 +5,54 @@ from dataclasses import dataclass
 
 @dataclass
 class SimulationStep:
+    """An instance of one step of the simulation"""
+
+    river_snapshot: RiverNetwork
+    """A snapshot of the river network at a time step"""
+
+    year: int
+    """The year of the simulation"""
+
+    @property
+    def cells_flooded(self) -> list[Cell]:
+        """A list of all cell currently flooded"""
+
+        flooded_cells: list[Cell] = []
+
+        for edge in self.river_snapshot.get_edges():
+            for cell in edge.cells:
+                if cell.flooded_state:
+                    flooded_cells.append(cell)
+
+        return flooded_cells
+
+    @property
+    def dams_broken(self) -> list[Dam]:
+        """A list of all dams broken in this step"""
+
+        broken_dams: list[Dam] = []
+
+        for edge in self.river_snapshot.get_edges():
+            for cell in edge.cells:
+                if cell.dam.is_broken:
+                    if cell.dam.broken_year == self.year:
+                        broken_dams.append(cell)
+
+        return broken_dams
+
+    @property
+    def dams_created(self) -> list[Dam]:
+        """A list of all dams created in this step"""
+
+        created_dams: list[Dam] = []
+
+        for edge in self.river_snapshot.get_edges():
+            for cell in edge.cells:
+                if not cell.dam.is_broken:
+                    if cell.dam.create_year == self.year:
+                        created_dams.append(cell)
+
+        return created_dams
 
 
 @dataclass
