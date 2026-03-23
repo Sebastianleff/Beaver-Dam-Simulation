@@ -1,6 +1,30 @@
 """All Dataclass models for the program"""
 
-from dataclasses import dataclass
+
+@dataclass
+class Dam:
+    """A dam"""
+
+    _counter: ClassVar[count] = count(1)
+
+    cell: Cell
+    """Which cell the dam is in"""
+
+    created_year: int
+    """The year the dam was created"""
+
+    dam_id: int = field(default_factory=lambda: next(Dam._counter))
+    """Unique id for the dam"""
+
+    meadow: bool = False
+    """Whether the dam is a beaver meadow"""
+
+    broken_year: int | None = None
+    """The year the dam was broken"""
+
+    @property
+    def is_broken(self) -> bool:
+        return self.broken_year is not None
 
 
 @dataclass
