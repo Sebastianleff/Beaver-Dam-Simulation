@@ -1,11 +1,105 @@
 """All Dataclass models for the program"""
+from __future__ import annotations
+from dataclasses import dataclass,field
+from itertools import count
+from typing import ClassVar
+
+
+class RiverNetwork:
+    """A directed graph representing a river network."""
+
+    Nodes: list[RiverNode]
+    Edges: list[RiverEdge]
+
+    def add_node(self) -> None:
+        """Add a new node to the graph."""
+        self.Nodes.append(RiverNode())
+
+    def add_edge(self, down_stream_node, up_stream_node) -> None:
+        """Add an edge to the graph and connect it nodes."""
+        self.Edges.append(RiverEdge(down_stream_node, up_stream_node))
+
+
+@dataclass
+class RiverNode:
+    """A node representing a intersection of two segments of river"""
+
+    _node_counter: ClassVar[count] = count(1)
+
+    down_stream_edge: RiverEdge | None = None
+    """The edge that is downstream of this node"""
+
+    up_stream_edge: list[RiverEdge] | None = None
+    """The edges that are upstream of this node"""
+
+    id: int = field(default_factory=lambda: next(RiverNode._node_counter))
+    """The id of the Node"""
+
+
+@dataclass
+class RiverEdge:
+    """An edge representing a segment of river that does not join another segment of river"""
+
+    _edge_counter: ClassVar[count] = count(1)
+
+    down_stream_node: RiverNode
+    """The node downstream of the edge"""
+
+    up_stream_node: RiverNode
+    """The node upstream of the edge"""
+
+    cells: dict[int, Cell] | None = None
+    """The cells that are on the edge held with their position"""
+
+    id: int = field(default_factory=lambda: next(RiverEdge._edge_counter))
+    """The id of the Edge"""
+
+    length: int = 100
+    """The length of the edge, must be whole number"""
+
+    def create_cells(self):
+        """Create all cells needed for the edge."""
+
+        num_cells = int(self.length/10) #magic 10 might be user defined in future
+        cells = {}
+
+        for i in range(num_cells):
+            cell = Cell(self, i+1)
+            cells[i+1] = cell
+
+        self.cells = cells
+
+
+@dataclass
+class Cell:
+    """A distinct area cell of the river edge"""
+
+    _cell_counter: ClassVar[count] = count(1)
+
+    edge: RiverEdge
+    """The edge that the cell exists on"""
+
+    position: int
+    """The position of the cell as its position relative other cells to the upstream of a edge"""
+
+    id: int = field(default_factory=lambda: next(Cell._cell_counter))
+    """The id of the cell"""
+
+    dam: Dam | None = None
+    """A dam that may exist in a cell"""
+
+    flooded: bool | None = False
+    """If a cell is flooded"""
+
+    flooded_time: int | None = None
+    """How long a cell has been flooded"""
 
 
 @dataclass
 class Dam:
     """A dam"""
 
-    _counter: ClassVar[count] = count(1)
+    _dam_counter: ClassVar[count] = count(1)
 
     cell: Cell
     """Which cell the dam is in"""
@@ -13,7 +107,7 @@ class Dam:
     created_year: int
     """The year the dam was created"""
 
-    dam_id: int = field(default_factory=lambda: next(Dam._counter))
+    id: int = field(default_factory=lambda: next(Dam._dam_counter))
     """Unique id for the dam"""
 
     meadow: bool = False
@@ -43,7 +137,7 @@ class SimulationStep:
 
         flooded_cells: list[Cell] = []
 
-        for edge in self.river_snapshot.get_edges():
+        for edge in self.river_snapshot.edges:
             for cell in edge.cells:
                 if cell.flooded_state:
                     flooded_cells.append(cell)
@@ -106,7 +200,7 @@ class SimParam:
 
     def __post_init__(self):
         """Check if the parameters are valid"""
-        
+
         probs = [self.dam_creation_probability,
                  self.dam_break_probability,
                  self.flood_probability,
@@ -121,18 +215,3 @@ class SimParam:
         for prob in probs:
             if not (0 <= prob <= 1):
                 raise ValueError("Probability must be between 0 and 1")
-
-
-@dataclass
-class RiverNode:
-
-
-@dataclass
-class RiverEdge:
-    __init__
-
-@dataclass
-class Cell:
-
-@dataclass
-class Dam:
