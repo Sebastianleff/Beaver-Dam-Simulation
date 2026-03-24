@@ -57,7 +57,7 @@ class RiverEdge:
     length: int = 100
     """The length of the edge, must be whole number"""
 
-    def create_cells(self):
+    def create_cells(self) -> None:
         """Create all cells needed for the edge."""
 
         num_cells = int(self.length/10) #magic 10 might be user defined in future
@@ -68,6 +68,9 @@ class RiverEdge:
             cells[i+1] = cell
 
         self.cells = cells
+
+    def __post_init__(self):
+        self.create_cells()
 
 
 @dataclass
