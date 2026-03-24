@@ -213,8 +213,6 @@ class SimParam:
             raise ValueError("Years must be positive")
         if self.stabilization_time <= 0:
             raise ValueError("Stabilization time must be positive")
-        if self.random_seed is None:
-            raise ValueError("Random seed must be provided")
         for prob in probs:
             if not (0 <= prob <= 1):
                 raise ValueError("Probability must be between 0 and 1")
