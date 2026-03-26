@@ -97,6 +97,10 @@ class Cell:
     flooded_time: int | None = None
     """How long a cell has been flooded"""
 
+    def create_dam(self, year) -> None:
+        """Create the dam for this cell"""
+        self.dam = Dam(self, year)
+
 
 @dataclass
 class Dam:
@@ -122,6 +126,11 @@ class Dam:
     @property
     def is_broken(self) -> bool:
         return self.broken_year is not None
+
+    def break_dam(self, year: int) -> None:
+        """Break the dam"""
+        self.broken_year = year
+        #self.meadow = ?
 
 
 @dataclass
