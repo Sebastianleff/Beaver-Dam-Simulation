@@ -124,7 +124,7 @@ class Dam:
     """The year the dam was broken"""
 
     @property
-    def is_broken(self) -> bool:
+    def broken(self) -> bool:
         return self.broken_year is not None
 
     def break_dam(self, year: int) -> None:
@@ -164,7 +164,7 @@ class SimulationStep:
 
         for edge in self.river_snapshot.edges:
             for cell in edge.cells:
-                if cell.dam.is_broken:
+                if cell.dam.broken:
                     if cell.dam.broken_year == self.year:
                         broken_dams.append(cell)
 
@@ -178,7 +178,7 @@ class SimulationStep:
 
         for edge in self.river_snapshot.edges:
             for cell in edge.cells:
-                if not cell.dam.is_broken:
+                if not cell.dam.broken:
                     if cell.dam.create_year == self.year:
                         created_dams.append(cell)
 
