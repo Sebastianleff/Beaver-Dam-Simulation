@@ -95,11 +95,17 @@ class Cell:
     """If a cell is flooded"""
 
     flooded_time: int | None = None
-    """How long a cell has been flooded"""
+    """How long a cell has been flooded with start year at zero"""
 
     def create_dam(self, year) -> None:
         """Create the dam for this cell"""
         self.dam = Dam(self, year)
+
+    def flood(self) -> None:
+        """Flood the cell"""
+        self.flooded= True
+        self.flooded_time = 0
+
 
 
 @dataclass
