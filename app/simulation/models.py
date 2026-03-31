@@ -8,8 +8,8 @@ from typing import ClassVar
 class RiverNetwork:
     """A directed graph representing a river network."""
 
-    nodes: list[RiverNode]
-    edges: list[RiverEdge]
+    nodes: list[RiverNode] = []
+    edges: list[RiverEdge] = []
 
     def add_node(self) -> None:
         """Add a new node to the graph."""
@@ -83,7 +83,7 @@ class Cell:
     """The edge that the cell exists on"""
 
     position: int
-    """The position of the cell as its position relative other cells to the upstream of a edge"""
+    """The position of the cell as its position relative other cells to the upstream of a edge starting at 1"""
 
     id: int = field(default_factory=lambda: next(Cell._cell_counter))
     """The id of the cell"""
@@ -103,9 +103,12 @@ class Cell:
 
     def flood(self) -> None:
         """Flood the cell"""
-        self.flooded= True
+        self.flooded = True
         self.flooded_time = 0
 
+    def clear_flood(self) -> None:
+        """Clear the cell flooding"""
+        self.flooded = False
 
 
 @dataclass
