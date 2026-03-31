@@ -91,7 +91,7 @@ class Cell:
     dam: Dam | None = None
     """A dam that may exist in a cell"""
 
-    flooded: bool | None = False
+    flooded: bool = False
     """If a cell is flooded"""
 
     flooded_time: int | None = None
