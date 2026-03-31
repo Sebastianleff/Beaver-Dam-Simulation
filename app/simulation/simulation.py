@@ -84,7 +84,6 @@ class Simulation:
                     cell.flood()
                     continue
 
-
                 # First cell doesn't have upstream cell, all logic past here uses upstream state
                 if cell.position == 1:
                     continue
