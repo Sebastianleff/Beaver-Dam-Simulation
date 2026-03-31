@@ -159,8 +159,8 @@ class SimulationStep:
         flooded_cells: list[Cell] = []
 
         for edge in self.river_snapshot.edges:
-            for cell in edge.cells:
-                if cell.flooded_state:
+            for cell in edge.cells.values():
+                if cell.flooded:
                     flooded_cells.append(cell)
 
         return flooded_cells
@@ -172,10 +172,10 @@ class SimulationStep:
         broken_dams: list[Dam] = []
 
         for edge in self.river_snapshot.edges:
-            for cell in edge.cells:
-                if cell.dam.broken:
+            for cell in edge.cells.values():
+                if cell.dam and cell.dam.broken:
                     if cell.dam.broken_step == self.step:
-                        broken_dams.append(cell)
+                        broken_dams.append(cell.dam)
 
         return broken_dams
 
@@ -186,10 +186,10 @@ class SimulationStep:
         created_dams: list[Dam] = []
 
         for edge in self.river_snapshot.edges:
-            for cell in edge.cells:
-                if not cell.dam.broken:
+            for cell in edge.cells.values():
+                if cell.dam and not cell.dam.broken:
                     if cell.dam.created_step == self.step:
-                        created_dams.append(cell)
+                        created_dams.append(cell.dam)
 
         return created_dams
 
