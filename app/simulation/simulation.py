@@ -37,13 +37,13 @@ class Simulation:
     def history(self) -> list[SimStep]:
         return self._history
 
-    def _simulate(self):
+    def _simulate(self) -> None:
         """Simulate the simulation"""
 
         for _ in range(self._param.steps):
             self._run_step()
 
-    def _run_step(self):
+    def _run_step(self) -> None:
         """Runs the next step in the simulation"""
 
         self._create_dams()
