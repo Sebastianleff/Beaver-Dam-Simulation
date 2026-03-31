@@ -22,7 +22,7 @@ class RiverNetwork:
 
 @dataclass
 class RiverNode:
-    """A node representing a intersection of two segments of river"""
+    """A node representing an intersection of two segments of river"""
 
     _node_counter: ClassVar[count] = count(1)
 
