@@ -8,8 +8,12 @@ from typing import ClassVar
 class RiverNetwork:
     """A directed graph representing a river network."""
 
-    nodes: list[RiverNode] = []
-    edges: list[RiverEdge] = []
+    nodes: list[RiverNode]
+    edges: list[RiverEdge]
+
+    def __init__(self):
+        self.nodes = []
+        self.edges = []
 
     def add_node(self) -> None:
         """Add a new node to the graph."""
