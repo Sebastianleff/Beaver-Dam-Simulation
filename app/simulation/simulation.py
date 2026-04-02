@@ -51,8 +51,10 @@ class Simulation:
         self._propagate_floods()
         self._stabilize_floods()
         self._time_step()
-        self._save_step()
+
         self._step += 1
+        
+        self._save_step()
 
     def _create_dams(self) -> None:
         """Create new dams based on the dam creation probability"""
