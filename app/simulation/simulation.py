@@ -107,6 +107,7 @@ class Simulation:
                         lower_cell.flood(self._step)
                         if lower_cell.dam:
                             lower_cell.dam.break_dam(self._step)
+                            lower_cell.dam.meadow = False
                     # All cells after a cascade break must be flooded and have dams broken
                     break
 
@@ -117,6 +118,7 @@ class Simulation:
             for cell in edge.cells.values():
                 if not cell.flooded:
                     continue
+
                 if cell.flooded_time(self._step) >= self._param.stabilization_time:
                     cell.clear_flood()
 
