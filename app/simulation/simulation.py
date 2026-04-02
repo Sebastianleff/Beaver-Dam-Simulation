@@ -50,6 +50,7 @@ class Simulation:
         self._break_dams()
         self._propagate_floods()
         self._stabilize_floods()
+        self._time_step()
         self._save_step()
         self._step += 1
 
@@ -119,6 +120,14 @@ class Simulation:
                     continue
                 if cell.flooded_time >= self._param.stabilization_time:
                     cell.clear_flood()
+
+    def _time_step(self) -> None:
+        """Increment the simulation times across objects"""
+
+        for edge in self._river.edges:
+            for cell in edge.cells.values():
+                if cell.flooded:
+                    cell.flooded_time + 1
 
     def _save_step(self) -> None:
         step = SimStep(copy.deepcopy(self._river), self._step)
