@@ -115,6 +115,8 @@ class Simulation:
 
         for edge in self._river.edges:
             for cell in edge.cells.values():
+                if not cell.flooded:
+                    continue
                 if cell.flooded_time >= self._param.stabilization_time:
                     cell.clear_flood()
 
