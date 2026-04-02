@@ -46,14 +46,11 @@ class Simulation:
     def _run_step(self) -> None:
         """Runs the next step in the simulation"""
 
+        self._step += 1
         self._create_dams()
         self._break_dams()
         self._propagate_floods()
         self._stabilize_floods()
-        self._time_step()
-
-        self._step += 1
-        
         self._save_step()
 
     def _create_dams(self) -> None:
@@ -84,7 +81,7 @@ class Simulation:
                     and cell.dam.broken_step == self._step
                     and self._rng.random() < self._param.flood_probability
                 ):
-                    cell.flood()
+                    cell.flood(self._step)
                     continue
 
                 # First cell doesn't have upstream cell, all logic past here uses upstream state
@@ -100,14 +97,14 @@ class Simulation:
                     continue
 
                 if not cell.dam:
-                    cell.flood()
+                    cell.flood(self._step)
                     continue
 
                 # If there is a dam, then run chance to trigger cascade flood
                 if cell.dam and self._rng.random() < self._param.flood_break_probability:
                     for position in range(cell.position, len(edge.cells) + 1):
                         lower_cell = edge.cells[position]
-                        lower_cell.flood()
+                        lower_cell.flood(self._step)
                         if lower_cell.dam:
                             lower_cell.dam.break_dam(self._step)
                     # All cells after a cascade break must be flooded and have dams broken
@@ -120,16 +117,8 @@ class Simulation:
             for cell in edge.cells.values():
                 if not cell.flooded:
                     continue
-                if cell.flooded_time >= self._param.stabilization_time:
+                if cell.flooded_time(self._step) >= self._param.stabilization_time:
                     cell.clear_flood()
-
-    def _time_step(self) -> None:
-        """Increment the simulation times across objects"""
-
-        for edge in self._river.edges:
-            for cell in edge.cells.values():
-                if cell.flooded:
-                    cell.flooded_time + 1
 
     def _save_step(self) -> None:
         step = SimStep(copy.deepcopy(self._river), self._step)

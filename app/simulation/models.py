@@ -95,24 +95,31 @@ class Cell:
     dam: Dam | None = None
     """A dam that may exist in a cell"""
 
-    flooded: bool = False
-    """If a cell is flooded"""
+    flooded_step : int | None = None
+    """The step the dam was flooded"""
 
-    flooded_time: int | None = None
-    """How long a cell has been flooded with start step at zero"""
+    @property
+    def flooded(self) -> bool:
+        """If the cell is flooded"""
+
+        return self.flooded_step is not None
+
+    def flooded_time(self, step) -> int:
+        """How long the cell has been flooded"""
+
+        return step - self.flooded_step
 
     def create_dam(self, step) -> None:
         """Create the dam for this cell"""
         self.dam = Dam(self, step)
 
-    def flood(self) -> None:
+    def flood(self, step) -> None:
         """Flood the cell"""
-        self.flooded = True
-        self.flooded_time = 0
+        self.flooded_step = step
 
     def clear_flood(self) -> None:
         """Clear the cell flooding"""
-        self.flooded = False
+        self.flooded_step = None
 
 
 @dataclass
