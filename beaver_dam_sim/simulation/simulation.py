@@ -59,6 +59,7 @@ class Simulation:
 
         for edge in self._river.edges:
             for cell in (c for c in edge.cells.values() if not c.dam and not c.flooded):
+                assert not cell.dam
                 if self._rng.random() < self._param.dam_creation_probability:
                     cell.create_dam(self._step)
 
@@ -67,6 +68,7 @@ class Simulation:
 
         for edge in self._river.edges:
             for cell in (c for c in edge.cells.values() if c.dam):
+                assert cell.dam
                 if self._rng.random() < self._param.dam_break_probability:
                     cell.dam.break_dam(self._step)
 
