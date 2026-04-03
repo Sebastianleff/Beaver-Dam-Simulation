@@ -108,6 +108,7 @@ class Cell:
     def flooded_time(self, step) -> int:
         """How long the cell has been flooded"""
 
+        assert self.flooded_step is not None
         return step - self.flooded_step
 
     def create_dam(self, step) -> None:
