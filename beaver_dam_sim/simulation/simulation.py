@@ -60,6 +60,7 @@ class Simulation:
         for edge in self._river.edges:
             for cell in (c for c in edge.cells.values() if not c.dam and not c.flooded):
                 assert not cell.dam
+                assert not cell.flooded
                 if self._rng.random() < self._param.dam_creation_probability:
                     cell.create_dam(self._step)
 
@@ -71,6 +72,8 @@ class Simulation:
                 assert cell.dam
                 if self._rng.random() < self._param.dam_break_probability:
                     cell.dam.break_dam(self._step)
+                    if self._rng.random() < self._param.meadow_probability:
+                        cell.dam.make_meadow()
 
     def _propagate_floods(self) -> None:
         """Propagate floods based on the dam propagation probability"""

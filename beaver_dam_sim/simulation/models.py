@@ -152,7 +152,11 @@ class Dam:
     def break_dam(self, step: int) -> None:
         """Break the dam"""
         self.broken_step = step
-        # self.meadow = ?
+
+    def make_meadow(self) -> None:
+        """Make the dam a meadow"""
+        assert self.broken
+        self.meadow = True
 
 
 @dataclass
@@ -232,6 +236,9 @@ class SimParam:
     random_seed: int
     """The random seed to use"""
 
+    meadow_probability: float = 0
+    """The probability a meadow will occur when a dam breaks"""
+
     def __post_init__(self):
         """Check if the parameters are valid"""
 
@@ -239,6 +246,7 @@ class SimParam:
                  self.dam_break_probability,
                  self.flood_probability,
                  self.flood_break_probability,
+                 self.meadow_probability,
                  ]
         if self.steps <= 0:
             raise ValueError("Number of steps must be positive")
