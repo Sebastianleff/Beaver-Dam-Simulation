@@ -53,7 +53,7 @@ class RiverEdge:
     up_stream_node: RiverNode
     """The node upstream of the edge"""
 
-    cells: dict[int, Cell] | None = None
+    cells: dict[int, Cell] = field(default_factory=dict)
     """The cells that are on the edge held with their position"""
 
     id: int = field(default_factory=lambda: next(RiverEdge._edge_counter))
