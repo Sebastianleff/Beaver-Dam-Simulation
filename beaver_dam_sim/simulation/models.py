@@ -224,7 +224,7 @@ class SimParam:
     """The probability a flood will break a dam"""
 
     stabilization_time: int
-    """The time in years/steps it takes for a cell to return to a unfounded state"""
+    """The time in years/steps it takes for a cell to return to a unflooded state"""
 
     steps: int
     """The number of years/steps the simulation will run"""
