@@ -2,9 +2,9 @@
 import copy
 
 import numpy as np
-from app.simulation.models import SimulationStep as SimStep
-from app.simulation.models import SimParam as Param
-from app.simulation.models import RiverNetwork as River
+from beaver_dam_sim.simulation.models import SimulationStep as SimStep
+from beaver_dam_sim.simulation.models import SimParam as Param
+from beaver_dam_sim.simulation.models import RiverNetwork as River
 
 class Simulation:
 
