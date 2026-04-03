@@ -2,12 +2,13 @@
 import copy
 
 import numpy as np
-from beaver_dam_sim.simulation.models import SimulationStep as SimStep
-from beaver_dam_sim.simulation.models import SimParam as Param
+
 from beaver_dam_sim.simulation.models import RiverNetwork as River
+from beaver_dam_sim.simulation.models import SimParam as Param
+from beaver_dam_sim.simulation.models import SimulationStep as SimStep
+
 
 class Simulation:
-
     _step: int
     """The current simulation step being processed"""
 
@@ -77,9 +78,9 @@ class Simulation:
 
                 # Flood newly broken dams
                 if (
-                    cell.dam
-                    and cell.dam.broken_step == self._step
-                    and self._rng.random() < self._param.flood_probability
+                        cell.dam
+                        and cell.dam.broken_step == self._step
+                        and self._rng.random() < self._param.flood_probability
                 ):
                     cell.flood(self._step)
                     continue

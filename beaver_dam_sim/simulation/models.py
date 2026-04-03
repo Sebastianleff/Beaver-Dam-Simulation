@@ -1,6 +1,7 @@
 """All Dataclass models for the program"""
 from __future__ import annotations
-from dataclasses import dataclass,field
+
+from dataclasses import dataclass, field
 from itertools import count
 from typing import ClassVar
 
@@ -64,12 +65,12 @@ class RiverEdge:
     def create_cells(self) -> None:
         """Create all cells needed for the edge."""
 
-        num_cells = int(self.length/10) #magic 10 might be user defined in future
+        num_cells = int(self.length / 10)  # magic 10 might be user defined in future
         cells = {}
 
         for i in range(num_cells):
-            cell = Cell(self, i+1)
-            cells[i+1] = cell
+            cell = Cell(self, i + 1)
+            cells[i + 1] = cell
 
         self.cells = cells
 
@@ -95,7 +96,7 @@ class Cell:
     dam: Dam | None = None
     """A dam that may exist in a cell"""
 
-    flooded_step : int | None = None
+    flooded_step: int | None = None
     """The step the dam was flooded"""
 
     @property
@@ -150,7 +151,7 @@ class Dam:
     def break_dam(self, step: int) -> None:
         """Break the dam"""
         self.broken_step = step
-        #self.meadow = ?
+        # self.meadow = ?
 
 
 @dataclass
