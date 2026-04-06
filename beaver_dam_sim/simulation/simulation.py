@@ -70,6 +70,7 @@ class Simulation:
         for edge in self._river.edges:
             for cell in (c for c in edge.cells.values() if c.dam and not c.dam.broken):
                 assert cell.dam
+                assert not cell.dam.broken
                 if self._rng.random() < self._param.dam_break_probability:
                     cell.dam.break_dam(self._step)
                     if self._rng.random() < self._param.meadow_probability:
@@ -97,7 +98,7 @@ class Simulation:
                 up_stream_cell = edge.cells[cell.position - 1]
 
                 # Floods should not refresh unless they happen on current step
-                if not up_stream_cell.flooded_step != self._step:
+                if up_stream_cell.flooded_step != self._step:
                     continue
 
                 # Meadows block flood propagation
@@ -113,7 +114,7 @@ class Simulation:
                     for position in range(cell.position, len(edge.cells) + 1):
                         lower_cell = edge.cells[position]
                         lower_cell.flood(self._step)
-                        if lower_cell.dam:
+                        if lower_cell.dam and not lower_cell.dam.broken:
                             lower_cell.dam.break_dam(self._step)
                             if lower_cell.dam.meadow:
                                 lower_cell.dam.meadow = False
