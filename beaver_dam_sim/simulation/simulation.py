@@ -68,7 +68,7 @@ class Simulation:
         """Break dams based on the dam break probability"""
 
         for edge in self._river.edges:
-            for cell in (c for c in edge.cells.values() if c.dam):
+            for cell in (c for c in edge.cells.values() if c.dam and not c.dam.broken):
                 assert cell.dam
                 if self._rng.random() < self._param.dam_break_probability:
                     cell.dam.break_dam(self._step)
@@ -95,7 +95,7 @@ class Simulation:
                     continue
 
                 up_stream_cell = edge.cells[cell.position - 1]
-            
+
                 # Floods should not refresh unless they happen on current step
                 if not up_stream_cell.flooded_step != self._step:
                     continue
@@ -104,7 +104,7 @@ class Simulation:
                 if cell.dam and cell.dam.meadow:
                     continue
 
-                if not cell.dam:
+                if not cell.dam or cell.dam.broken:
                     cell.flood(self._step)
                     continue
 
