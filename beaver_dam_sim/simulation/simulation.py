@@ -95,7 +95,9 @@ class Simulation:
                     continue
 
                 up_stream_cell = edge.cells[cell.position - 1]
-                if not up_stream_cell.flooded:
+            
+                # Floods should not refresh unless they happen on current step
+                if not up_stream_cell.flooded_step != self._step:
                     continue
 
                 # Meadows block flood propagation
