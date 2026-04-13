@@ -1,6 +1,7 @@
 """All Dataclass models for the program"""
 from __future__ import annotations
-from dataclasses import dataclass,field
+
+from dataclasses import dataclass, field
 from itertools import count
 from typing import ClassVar
 
@@ -10,6 +11,10 @@ class RiverNetwork:
 
     nodes: list[RiverNode]
     edges: list[RiverEdge]
+
+    def __init__(self):
+        self.nodes = []
+        self.edges = []
 
     def add_node(self) -> None:
         """Add a new node to the graph."""
@@ -22,7 +27,7 @@ class RiverNetwork:
 
 @dataclass
 class RiverNode:
-    """A node representing a intersection of two segments of river"""
+    """A node representing an intersection of two segments of river"""
 
     _node_counter: ClassVar[count] = count(1)
 
@@ -48,7 +53,7 @@ class RiverEdge:
     up_stream_node: RiverNode
     """The node upstream of the edge"""
 
-    cells: dict[int, Cell] | None = None
+    cells: dict[int, Cell] = field(default_factory=dict)
     """The cells that are on the edge held with their position"""
 
     id: int = field(default_factory=lambda: next(RiverEdge._edge_counter))
@@ -60,12 +65,12 @@ class RiverEdge:
     def create_cells(self) -> None:
         """Create all cells needed for the edge."""
 
-        num_cells = int(self.length/10) #magic 10 might be user defined in future
+        num_cells = int(self.length / 10)  # magic 10 might be user defined in future
         cells = {}
 
         for i in range(num_cells):
-            cell = Cell(self, i+1)
-            cells[i+1] = cell
+            cell = Cell(self, i + 1)
+            cells[i + 1] = cell
 
         self.cells = cells
 
@@ -83,7 +88,7 @@ class Cell:
     """The edge that the cell exists on"""
 
     position: int
-    """The position of the cell as its position relative other cells to the upstream of a edge"""
+    """The position of the cell as its position relative other cells to the upstream of a edge starting at 1"""
 
     id: int = field(default_factory=lambda: next(Cell._cell_counter))
     """The id of the cell"""
@@ -91,11 +96,32 @@ class Cell:
     dam: Dam | None = None
     """A dam that may exist in a cell"""
 
-    flooded: bool | None = False
-    """If a cell is flooded"""
+    flooded_step: int | None = None
+    """The step the dam was flooded"""
 
-    flooded_time: int | None = None
-    """How long a cell has been flooded"""
+    @property
+    def flooded(self) -> bool:
+        """If the cell is flooded"""
+
+        return self.flooded_step is not None
+
+    def flooded_time(self, step) -> int:
+        """How long the cell has been flooded"""
+
+        assert self.flooded_step is not None
+        return step - self.flooded_step
+
+    def create_dam(self, step) -> None:
+        """Create the dam for this cell"""
+        self.dam = Dam(self, step)
+
+    def flood(self, step) -> None:
+        """Flood the cell"""
+        self.flooded_step = step
+
+    def clear_flood(self) -> None:
+        """Clear the cell flooding"""
+        self.flooded_step = None
 
 
 @dataclass
@@ -107,8 +133,8 @@ class Dam:
     cell: Cell
     """Which cell the dam is in"""
 
-    created_year: int
-    """The year the dam was created"""
+    created_step: int
+    """The step the dam was created"""
 
     id: int = field(default_factory=lambda: next(Dam._dam_counter))
     """Unique id for the dam"""
@@ -116,12 +142,21 @@ class Dam:
     meadow: bool = False
     """Whether the dam is a beaver meadow"""
 
-    broken_year: int | None = None
-    """The year the dam was broken"""
+    broken_step: int | None = None
+    """The step the dam was broken"""
 
     @property
-    def is_broken(self) -> bool:
-        return self.broken_year is not None
+    def broken(self) -> bool:
+        return self.broken_step is not None
+
+    def break_dam(self, step: int) -> None:
+        """Break the dam"""
+        self.broken_step = step
+
+    def make_meadow(self) -> None:
+        """Make the dam a meadow"""
+        assert self.broken
+        self.meadow = True
 
 
 @dataclass
@@ -131,8 +166,8 @@ class SimulationStep:
     river_snapshot: RiverNetwork
     """A snapshot of the river network at a time step"""
 
-    year: int
-    """The year of the simulation"""
+    step: int
+    """The step of the simulation"""
 
     @property
     def cells_flooded(self) -> list[Cell]:
@@ -141,8 +176,8 @@ class SimulationStep:
         flooded_cells: list[Cell] = []
 
         for edge in self.river_snapshot.edges:
-            for cell in edge.cells:
-                if cell.flooded_state:
+            for cell in edge.cells.values():
+                if cell.flooded:
                     flooded_cells.append(cell)
 
         return flooded_cells
@@ -154,10 +189,10 @@ class SimulationStep:
         broken_dams: list[Dam] = []
 
         for edge in self.river_snapshot.edges:
-            for cell in edge.cells:
-                if cell.dam.is_broken:
-                    if cell.dam.broken_year == self.year:
-                        broken_dams.append(cell)
+            for cell in edge.cells.values():
+                if cell.dam and cell.dam.broken:
+                    if cell.dam.broken_step == self.step:
+                        broken_dams.append(cell.dam)
 
         return broken_dams
 
@@ -168,10 +203,10 @@ class SimulationStep:
         created_dams: list[Dam] = []
 
         for edge in self.river_snapshot.edges:
-            for cell in edge.cells:
-                if not cell.dam.is_broken:
-                    if cell.dam.create_year == self.year:
-                        created_dams.append(cell)
+            for cell in edge.cells.values():
+                if cell.dam and not cell.dam.broken:
+                    if cell.dam.created_step == self.step:
+                        created_dams.append(cell.dam)
 
         return created_dams
 
@@ -193,13 +228,16 @@ class SimParam:
     """The probability a flood will break a dam"""
 
     stabilization_time: int
-    """The time in years/steps it takes for a cell to return to a unfounded state"""
+    """The time in years/steps it takes for a cell to return to a unflooded state"""
 
-    years: int
+    steps: int
     """The number of years/steps the simulation will run"""
 
     random_seed: int
     """The random seed to use"""
+
+    meadow_probability: float = 0
+    """The probability a meadow will occur when a dam breaks"""
 
     def __post_init__(self):
         """Check if the parameters are valid"""
@@ -208,13 +246,12 @@ class SimParam:
                  self.dam_break_probability,
                  self.flood_probability,
                  self.flood_break_probability,
+                 self.meadow_probability,
                  ]
-        if self.years <= 0:
-            raise ValueError("Years must be positive")
+        if self.steps <= 0:
+            raise ValueError("Number of steps must be positive")
         if self.stabilization_time <= 0:
             raise ValueError("Stabilization time must be positive")
-        if self.random_seed is None:
-            raise ValueError("Random seed must be provided")
         for prob in probs:
             if not (0 <= prob <= 1):
                 raise ValueError("Probability must be between 0 and 1")
