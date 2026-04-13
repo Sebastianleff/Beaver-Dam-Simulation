@@ -4,8 +4,10 @@ from typing import List, Optional
 import random
 import csv
 
-from models import SimParam, SimulationStep, RiverNetwork, Dam
-from simulation_service import SimulationService  # your engine wrapper
+from beaver_dam_sim.simulation.models import (
+    SimParam, SimulationStep, RiverNetwork, Dam
+)
+from beaver_dam_sim.simulation.service import SimulationService  # your engine wrapper
 
 
 # Validation Service
