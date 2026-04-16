@@ -1,14 +1,8 @@
-# service.py (UI / Application Service Layer)
-
-from typing import List, Optional
-import random
+"""Services for UI to run, manage and validate Simulations"""
+import copy
 import csv
 
-from beaver_dam_sim.simulation.models import (
-    SimParam, SimulationStep, RiverNetwork, Dam
-)
-from beaver_dam_sim.simulation.service import SimulationService  # your engine wrapper
-
+from beaver_dam_sim.simulation import SimulationStep, SimParam, Simulation, RiverNetwork
 
 # Validation Service
 class ValidationService:
@@ -33,7 +27,7 @@ class ValidationService:
 class CSVService:
 
     @staticmethod
-    def load_sim_params(file_path: str) -> List[SimParam]:
+    def load_sim_params(file_path: str) -> list[SimParam]:
         params_list = []
 
         with open(file_path, newline="") as csvfile:
@@ -55,20 +49,23 @@ class CSVService:
         return params_list
 
     @staticmethod
-    def save_sim_results(file_path: str, results: List[SimulationStep]) -> None:
+    def save_sim_results(file_path: str, results: list[list]) -> None:
 
         with open(file_path, "w", newline="") as csvfile:
             writer = csv.writer(csvfile)
 
-            writer.writerow(["year", "cells_flooded", "dams_created", "dams_broken"])
+            writer.writerow(["simulation_id", "year", "cells_flooded", "dams_created", "dams_broken"])
 
-            for step in results:
-                writer.writerow([
-                    step.year,
-                    len(step.cells_flooded),
-                    len(step.dams_created),
-                    len(step.dams_broken)
-                ])
+            for sim_id, history in enumerate(results, 1):
+                for step in history:
+                    writer.writerow([
+                        sim_id,
+                        step.step,
+                        len(step.cells_flooded),
+                        len(step.dams_created),
+                        len(step.dams_broken)
+                    ])
+
 
 
 # RiverNetwork Factory
