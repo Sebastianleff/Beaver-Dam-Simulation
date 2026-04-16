@@ -92,33 +92,28 @@ class RiverNetworkFactory:
         return network
 
 
-# UI Application Service
 class AppService:
-    """
-    UI-facing service layer.
-    Only coordinates between UI and SimulationService.
-    """
+    """Interface for UI to run Simulations """
 
     def __init__(self):
-        self.simulation_service = SimulationService()
         self.validation_service = ValidationService()
         self.csv_service = CSVService()
         self.factory = RiverNetworkFactory()
 
-
-    # REQUIRED MAIN FUNCTION
-    def run_simulation(self, params: SimParam) -> List[SimulationStep]:
+    def run_simulation(self, params: SimParam, river: RiverNetwork | None) -> list[SimulationStep]:
 
         if not self.validation_service.validate_params(params):
             raise ValueError("Invalid simulation parameters")
         if river is None:
             river = self.factory.create_default_network()
 
-        return self.simulation_service.run_simulation(params)
+        assert(isinstance(river, RiverNetwork))
 
-    
-    # BATCH SIMULATION
-    def run_simulation_batch(self, input_file: str, output_file: str) -> None:
+        sim = Simulation(params, river)
+
+        return sim.history
+
+    def run_simulation_batch(self, input_file: str, output_file: str, river: RiverNetwork | None) -> None:
 
         params_list = self.csv_service.load_sim_params(input_file)
 
@@ -127,10 +122,10 @@ class AppService:
 
         assert(isinstance(river, RiverNetwork))
 
-
+        all_results: list[list] = []
 
         for params in params_list:
-            results = self.simulation_service.run_simulation(params)
-            all_results.extend(results)
+            sim = Simulation(params, copy.deepcopy(river))
+            all_results.append(sim.history)
 
         self.csv_service.save_sim_results(output_file, all_results)
