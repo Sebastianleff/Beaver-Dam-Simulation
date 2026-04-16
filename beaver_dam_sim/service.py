@@ -89,7 +89,7 @@ class RiverNetworkFactory:
         return network
 
 
-class AppService:
+class SimulationService:
     """Interface for UI to run Simulations """
 
     def __init__(self):
