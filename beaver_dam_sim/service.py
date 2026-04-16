@@ -75,20 +75,19 @@ class CSVService:
 class RiverNetworkFactory:
 
     @staticmethod
-    def create_network() -> RiverNetwork:
+    def create_default_network() -> RiverNetwork:
         network = RiverNetwork()
 
-        # Example simple graph
-        nodes = [RiverNetwork.Node() for _ in range(10)]  # adjust if needed
+        for _ in range(8):
+            network.add_node()
 
-        network.nodes.extend(nodes)
-
-        for i in range(len(nodes) - 1):
-            edge = RiverNetwork.Edge(
-                down_stream_node=nodes[i],
-                up_stream_node=nodes[i + 1]
-            )
-            network.edges.append(edge)
+        network.add_edge(5, 1)
+        network.add_edge(5,2)
+        network.add_edge(6, 3)
+        network.add_edge(6,4)
+        network.add_edge(7, 5)
+        network.add_edge(7,6)
+        network.add_edge(8,7)
 
         return network
 
