@@ -47,8 +47,8 @@ class CSVService:
                         flood_probability=float(row["flood_probability"]),
                         flood_break_probability=float(row["flood_break_probability"]),
                         stabilization_time=int(row["stabilization_time"]),
-                        years=int(row["years"]),
-                        random_seed=int(row["random_seed"]) if row.get("random_seed") else None
+                        steps=int(row["years"]),
+                        random_seed=int(row["random_seed"])
                     )
                 )
 
