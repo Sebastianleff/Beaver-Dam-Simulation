@@ -111,6 +111,8 @@ class AppService:
 
         if not self.validation_service.validate_params(params):
             raise ValueError("Invalid simulation parameters")
+        if river is None:
+            river = self.factory.create_default_network()
 
         return self.simulation_service.run_simulation(params)
 
@@ -120,7 +122,12 @@ class AppService:
 
         params_list = self.csv_service.load_sim_params(input_file)
 
-        all_results: List[SimulationStep] = []
+        if river is None:
+            river = self.factory.create_default_network()
+
+        assert(isinstance(river, RiverNetwork))
+
+
 
         for params in params_list:
             results = self.simulation_service.run_simulation(params)
