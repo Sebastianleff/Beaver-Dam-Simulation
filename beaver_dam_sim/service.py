@@ -24,7 +24,7 @@ class ValidationService:
             return False
         if params.stabilization_time <= 0:
             return False
-        if params.years <= 0:
+        if params.steps <= 0:
             return False
         return True
 
