@@ -42,6 +42,7 @@ pip install -r requirements.txt
 ```bash
 python console.py
 ```
+---
 ## Usage
 
 ### Single Simulation
@@ -69,6 +70,8 @@ You will provide:
 
 **Be sure to provide them as an absolute path**
 
+---
+
 ## Project Structure
 ```text
 beaver_dam_sim/
@@ -79,10 +82,12 @@ beaver_dam_sim/
 │   ├── console.py          # CLI interface
 ├── service.py              # Service layer handling simulations
 ```
-
+---
 ## License
 
 This project is licensed under the MIT License. See the [License](LICENSE) file for details.
+
+---
 
 ## Authors
 - Sebastian Leff - Team Lead and Simulation Dev
