@@ -10,7 +10,7 @@ A stochastic simulation system for modeling beaver dam creation, breakage, and c
 
 ## Overview
 
-This project simulates how **dam dynamics influence flooding** over time using a **stepwise probabilistic model** on a directed river network.
+This project simulates how dam dynamics influence flooding over time using a stepwise probabilistic model on a directed river network.
 
 ### Features
 
