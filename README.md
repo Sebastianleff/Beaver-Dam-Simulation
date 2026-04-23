@@ -1,9 +1,13 @@
 # Beaver Dam Simulation
 
-[![GitHub last commit](https://img.shields.io/github/last-commit/Sebastianleff/Beaver-Dam-Simulation.svg)](https://github.com/Sebastianleff/Beaver-Dam-Simulation/commits/main)
-[![GitHub release](https://img.shields.io/github/v/release/Sebastianleff/Beaver-Dam-Simulation)](https://github.com/Sebastianleff/Beaver-Dam-Simulation/releases)
+[![Python Version](https://img.shields.io/badge/Python-3.13%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/github/actions/workflow/status/Sebastianleff/Beaver-Dam-Simulation/python-app.yml?branch=main&label=Tests)](https://github.com/Sebastianleff/Beaver-Dam-Simulation/actions/workflows/python-app.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/Sebastianleff/Beaver-Dam-Simulation?label=Release)](https://github.com/Sebastianleff/Beaver-Dam-Simulation/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python Version](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/)
+[![GitHub Last Commit](https://img.shields.io/github/last-commit/Sebastianleff/Beaver-Dam-Simulation.svg?label=Last%20Commit)](https://github.com/Sebastianleff/Beaver-Dam-Simulation/commits/main)
+
+
+
 
 A stochastic simulation system for modeling beaver dam creation, breakage, and catastrophic flooding across river networks.
 
@@ -76,26 +80,26 @@ You will provide:
 Only CSV files are valid, any other type of spreadsheet format will be rejected.
 The program will only except CSV files formated exactly in the following manner.
 
-| Column | Type | Required          | Valid Range |
-|---|---|-------------------|---|
+| Column                     | Type  | Required          | Valid Range    |
+|----------------------------|-------|-------------------|----------------|
 | `dam_creation_probability` | float | Yes               | `0.0` to `1.0` |
-| `dam_break_probability` | float | Yes               | `0.0` to `1.0` |
-| `flood_probability` | float | Yes               | `0.0` to `1.0` |
-| `flood_break_probability` | float | Yes               | `0.0` to `1.0` |
-| `stabilization_time` | int | Yes               | `> 0` |
-| `years` | int | Yes               | `> 0` |
-| `random_seed` | int | Yes               | Any integer |
-| `meadow_probability` | float | No, defaults to 0 | `0.0` to `1.0`  |
+| `dam_break_probability`    | float | Yes               | `0.0` to `1.0` |
+| `flood_probability`        | float | Yes               | `0.0` to `1.0` |
+| `flood_break_probability`  | float | Yes               | `0.0` to `1.0` |
+| `stabilization_time`       | int   | Yes               | `> 0`          |
+| `years`                    | int   | Yes               | `> 0`          |
+| `random_seed`              | int   | Yes               | Any integer    |
+| `meadow_probability`       | float | No, defaults to 0 | `0.0` to `1.0` |
 
 #### CSV Output:
 
-| Column | Type | Meaning |
-|---|---|---|
-| `simulation_id` | int | 1-based index of simulation in batch |
-| `year` | int | Step number |
-| `cells_flooded` | int | Count of flooded cells at that step |
-| `dams_created` | int | Count of dams created at that step |
-| `dams_broken` | int | Count of dams broken at that step |
+| Column          | Type | Meaning                              |
+|-----------------|------|--------------------------------------|
+| `simulation_id` | int  | 1-based index of simulation in batch |
+| `year`          | int  | Step number                          |
+| `cells_flooded` | int  | Count of flooded cells at that step  |
+| `dams_created`  | int  | Count of dams created at that step   |
+| `dams_broken`   | int  | Count of dams broken at that step    |
 
 ---
 
