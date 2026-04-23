@@ -42,7 +42,8 @@ class CSVService:
                         flood_break_probability=float(row["flood_break_probability"]),
                         stabilization_time=int(row["stabilization_time"]),
                         steps=int(row["years"]),
-                        random_seed=int(row["random_seed"])
+                        random_seed=int(row["random_seed"]),
+                        meadow_probability=float(row["meadow_probability"])
                     )
                 )
 
