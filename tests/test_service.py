@@ -70,7 +70,7 @@ class TestCSVService(unittest.TestCase):
 
             params_list = CSVService.load_sim_params(input_file)
 
-            self.assertEqual(len(params_list), 1)
+            self.assertEqual(len(params_list), 2)
             self.assertEqual(params_list[0].random_seed, 42)
 
 
