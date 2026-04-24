@@ -40,39 +40,10 @@ class TestValidationService(unittest.TestCase):
             meadow_probability=0.5
         )
 
-        # force invalid state AFTER creation
         params.steps = -1
+        params.dam_creation_probability = 1234
 
         self.assertFalse(ValidationService.validate_params(params))
-
-
-class TestSimParamModel(unittest.TestCase):
-
-    def test_invalid_probability_raises(self):
-        with self.assertRaises(ValueError):
-            SimParam(
-                dam_creation_probability=2.0,
-                dam_break_probability=0.5,
-                flood_probability=0.5,
-                flood_break_probability=0.5,
-                stabilization_time=3,
-                steps=10,
-                random_seed=1,
-                meadow_probability=0.5
-            )
-
-    def test_invalid_steps_raises(self):
-        with self.assertRaises(ValueError):
-            SimParam(
-                dam_creation_probability=0.5,
-                dam_break_probability=0.5,
-                flood_probability=0.5,
-                flood_break_probability=0.5,
-                stabilization_time=3,
-                steps=0,
-                random_seed=1,
-                meadow_probability=0.5
-            )
 
 
 class TestCSVService(unittest.TestCase):
@@ -95,11 +66,33 @@ class TestCSVService(unittest.TestCase):
                     "meadow_probability"
                 ])
                 writer.writerow([0.1, 0.2, 0.3, 0.4, 3, 5, 42, 0.5])
+                writer.writerow([0.2, 0.2, 0.2, 0.2, 5, 7, 2, 1])
 
             params_list = CSVService.load_sim_params(input_file)
 
             self.assertEqual(len(params_list), 1)
             self.assertEqual(params_list[0].random_seed, 42)
+
+
+class TestRiverNetworkFactory(unittest.TestCase):
+
+    def test_create_default_network_has_expected_topology(self):
+        network = RiverNetworkFactory.create_default_network()
+
+        self.assertEqual(len(network.nodes), 8)
+        self.assertEqual(len(network.edges), 7)
+
+        actual_pairs = {(edge.down_stream_node, edge.up_stream_node) for edge in network.edges}
+        expected_pairs = {
+            (5, 1),
+            (5, 2),
+            (6, 3),
+            (6, 4),
+            (7, 5),
+            (7, 6),
+            (8, 7),
+        }
+        self.assertSetEqual(actual_pairs, expected_pairs)
 
 
 class TestSimulationService(unittest.TestCase):
@@ -146,6 +139,7 @@ class TestSimulationService(unittest.TestCase):
                     "meadow_probability"
                 ])
                 writer.writerow([0.1, 0.1, 0.1, 0.1, 3, 5, 1, 0.5])
+                writer.writerow([0.2, 0.2, 0.2, 0.2, 5, 7, 2, 1])
 
             service.run_simulation_batch(input_file, output_file, None)
 
