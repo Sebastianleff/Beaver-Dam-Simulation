@@ -45,14 +45,12 @@ jobs:
       - name: Package artifact (macOS)
         if: runner.os == 'macOS'
         run: |
-          cd dist
-          ditto -c -k --sequesterRsrc --keepParent dist "${{ matrix.artifact }}.zip"
+          ditto -c -k --sequesterRsrc dist "${{ matrix.artifact }}.zip"
 
       - name: Package artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Set-Location dist
           Compress-Archive -Path dist\* -DestinationPath "${{ matrix.artifact }}.zip"
 
       - name: Upload workflow artifact
