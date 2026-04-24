@@ -14,15 +14,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-latest
             python: "3.11"
-            artifact: BeaverDamSimulation_MacArm64
-          - os: macos-13
-            python: "3.11"
-            artifact: BeaverDamSimulation_Macx86_64
+            artifact: BeaverDamSimulation_Mac
           - os: windows-latest
             python: "3.11"
-            artifact: BeaverDamSimulation_Winx64
+            artifact: BeaverDamSimulation_Win
 
     runs-on: ${{ matrix.os }}
 
