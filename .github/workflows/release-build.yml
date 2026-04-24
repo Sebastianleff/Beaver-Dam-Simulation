@@ -1,0 +1,75 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            py: "3.11"
+            arch: arm64
+            artifact: BeaverDamSimulation-macos-arm64
+          - os: macos-13
+            py: "3.11"
+            arch: x86_64
+            artifact: BeaverDamSimulation-macos-x86_64
+          - os: windows-latest
+            py: "3.11"
+            arch: x64
+            artifact: BeaverDamSimulation-windows-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.py }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --clean --noconfirm --target-arch ${{ matrix.arch }} console.spec
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --clean --noconfirm console.spec
+
+      - name: Package artifact (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          ls -la dist
+          ditto -c -k --sequesterRsrc --keepParent dist "${{ matrix.artifact }}.zip"
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist
+          Compress-Archive -Path dist\* -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+
+      - name: Attach to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}.zip
