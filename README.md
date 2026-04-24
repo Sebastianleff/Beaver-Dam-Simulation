@@ -28,7 +28,30 @@ This project simulates how dam dynamics influence flooding over time using a ste
 
 ## Installation
 
-### Requirements
+### Option 1 — Download Prebuilt Executable (Recommended)
+
+Download the latest version:
+
+- Windows: [Download](https://github.com/Sebastianleff/Beaver-Dam-Simulation/releases/latest/download/BeaverDamSimulation_Win.zip)
+- macOS: [Download](https://github.com/Sebastianleff/Beaver-Dam-Simulation/releases/latest/download/BeaverDamSimulation_Mac.zip)
+
+After downloading:
+
+1. Extract the `.zip`
+
+2. Run the application:
+   - Windows: open `BeaverDamSimulation.exe`
+   - macOS: run the `BeaverDamSimulation` executable
+
+> **macOS Note:**  
+> You may need to manually authorize the application the first time you run it.  
+> See Apple’s guide: https://support.apple.com/en-mo/guide/mac-help/mchleab3a043/mac
+
+---
+
+### Option 2 — Run from Source (Development)
+
+#### Requirements
 
 - Python 3.13+
 - PySide6
@@ -37,12 +60,12 @@ This project simulates how dam dynamics influence flooding over time using a ste
 - shiboken6
 - NumPy
 
-### Install Dependencies
+#### Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
-### Run the Program
+#### Run the Program
 
 ```bash
 python console.py
