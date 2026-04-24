@@ -5,6 +5,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -12,26 +15,31 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            py: "3.11"
-            arch: arm64
-            artifact: BeaverDamSimulation-macos-arm64
+            python: "3.11"
+            artifact: BeaverDamSimulation_MacArm64
           - os: macos-13
-            py: "3.11"
-            arch: x86_64
-            artifact: BeaverDamSimulation-macos-x86_64
+            python: "3.11"
+            artifact: BeaverDamSimulation_Macx86_64
           - os: windows-latest
-            py: "3.11"
-            arch: x64
-            artifact: BeaverDamSimulation-windows-x64
+            python: "3.11"
+            artifact: BeaverDamSimulation_Winx64
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.py }}
+          python-version: ${{ matrix.python }}
+
+      - name: Debug environment
+        run: |
+          python -V
+          python -c "import platform; print(platform.platform()); print(platform.machine())"
+          pip --version
 
       - name: Install dependencies
         run: |
@@ -39,13 +47,7 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          pyinstaller --clean --noconfirm --target-arch ${{ matrix.arch }} console.spec
-
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
+      - name: Build with PyInstaller spec
         run: |
           pyinstaller --clean --noconfirm console.spec
 
