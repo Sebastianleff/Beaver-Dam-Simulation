@@ -45,10 +45,6 @@ def arrange_river_full():
 
     return river
 
-def arrange_river_cascade():
-    river = make_river()
-    # Fill later
-    return river
 
 class TestSimulation(TestCase):
 
