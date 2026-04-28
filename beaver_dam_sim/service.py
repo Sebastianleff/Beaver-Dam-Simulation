@@ -68,7 +68,6 @@ class CSVService:
                     ])
 
 
-
 # RiverNetwork Factory
 class RiverNetworkFactory:
 
@@ -98,7 +97,7 @@ class SimulationService:
         self.csv_service = CSVService()
         self.factory = RiverNetworkFactory()
 
-    def run_simulation(self, params: SimParam, river: RiverNetwork | None) -> list[SimulationStep]:
+    def run_simulation(self, params: SimParam, river: RiverNetwork = None) -> list[SimulationStep]:
 
         if not self.validation_service.validate_params(params):
             raise ValueError("Invalid simulation parameters")
@@ -111,9 +110,13 @@ class SimulationService:
 
         return sim.history
 
-    def run_simulation_batch(self, input_file: str, output_file: str, river: RiverNetwork | None) -> None:
+    def run_simulation_batch(self, input_file: str, output_file: str, river: RiverNetwork = None) -> None:
 
         params_list = self.csv_service.load_sim_params(input_file)
+
+        for params in params_list:
+            if not self.validation_service.validate_params(params):
+                raise ValueError("Invalid simulation parameters")
 
         if river is None:
             river = self.factory.create_default_network()
