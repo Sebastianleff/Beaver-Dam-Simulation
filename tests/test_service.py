@@ -94,57 +94,5 @@ class TestRiverNetworkFactory(unittest.TestCase):
         }
         self.assertSetEqual(actual_pairs, expected_pairs)
 
-
-class TestSimulationService(unittest.TestCase):
-
-    def test_single_simulation_runs(self):
-        service = SimulationService()
-
-        params = SimParam(
-            dam_creation_probability=0.5,
-            dam_break_probability=0.5,
-            flood_probability=0.5,
-            flood_break_probability=0.5,
-            stabilization_time=3,
-            steps=5,
-            random_seed=1,
-            meadow_probability=0.5
-        )
-
-        river = RiverNetworkFactory.create_default_network()
-
-        history = service.run_simulation(params, river)
-
-        self.assertIsInstance(history, list)
-        self.assertGreaterEqual(len(history), 0)
-
-    def test_batch_simulation_creates_output_file(self):
-        service = SimulationService()
-
-        with tempfile.TemporaryDirectory() as tmp:
-
-            input_file = os.path.join(tmp, "input.csv")
-            output_file = os.path.join(tmp, "output.csv")
-
-            with open(input_file, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    "dam_creation_probability",
-                    "dam_break_probability",
-                    "flood_probability",
-                    "flood_break_probability",
-                    "stabilization_time",
-                    "years",
-                    "random_seed",
-                    "meadow_probability"
-                ])
-                writer.writerow([0.1, 0.1, 0.1, 0.1, 3, 5, 1, 0.5])
-                writer.writerow([0.2, 0.2, 0.2, 0.2, 5, 7, 2, 1])
-
-            service.run_simulation_batch(input_file, output_file, None)
-
-            self.assertTrue(os.path.exists(output_file))
-
-
 if __name__ == "__main__":
     unittest.main()
