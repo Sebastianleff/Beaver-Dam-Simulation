@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from beaver_dam_sim.service import SimulationService, RiverNetworkFactory
+from beaver_dam_sim.service import SimulationService
 from beaver_dam_sim.simulation import SimParam
 
 
