@@ -88,6 +88,31 @@ class RiverNetworkFactory:
 
         return network
 
+class RiverNetworkBuilder:
+    """Build custom river networks from user input."""
+
+    @staticmethod
+    def create_network(node_count: int, edges: list[tuple[int, int]]) -> RiverNetwork:
+        if node_count <= 0:
+            raise ValueError("node_count must be positive")
+
+        network = RiverNetwork()
+
+        for _ in range(node_count):
+            network.add_node()
+
+        for down, up in edges:
+
+            # VALIDATION
+            if down < 1 or down > node_count:
+                raise ValueError(f"Invalid downstream node: {down}")
+
+            if up < 1 or up > node_count:
+                raise ValueError(f"Invalid upstream node: {up}")
+
+            network.add_edge(down, up)
+
+        return network
 
 class SimulationService:
     """Interface for UI to run Simulations """
@@ -96,6 +121,12 @@ class SimulationService:
         self.validation_service = ValidationService()
         self.csv_service = CSVService()
         self.factory = RiverNetworkFactory()
+
+    def create_river(self, node_count: int, edges: list[tuple[int, int]]) -> RiverNetwork:
+        """
+        UI-facing API for creating custom river networks.
+        """
+        return RiverNetworkBuilder.create_network(node_count, edges)
 
     def run_simulation(self, params: SimParam, river: RiverNetwork = None) -> list[SimulationStep]:
 
