@@ -6,7 +6,6 @@ import os
 from beaver_dam_sim.service import (
     ValidationService,
     CSVService,
-    SimulationService,
     SimParam,
     RiverNetworkFactory
 )
