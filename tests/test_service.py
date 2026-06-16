@@ -7,7 +7,9 @@ from beaver_dam_sim.service import (
     ValidationService,
     CSVService,
     SimParam,
-    RiverNetworkFactory
+    RiverNetworkFactory,
+    RiverNetworkBuilder,
+    SimulationService
 )
 
 
@@ -92,6 +94,38 @@ class TestRiverNetworkFactory(unittest.TestCase):
             (8, 7),
         }
         self.assertSetEqual(actual_pairs, expected_pairs)
+
+
+class TestRiverNetworkBuilder(unittest.TestCase):
+
+    def test_create_custom_network(self):
+        network = RiverNetworkBuilder.create_network(
+            3,
+            [(1, 2), (2, 3)]
+        )
+
+        self.assertEqual(len(network.nodes), 3)
+        self.assertEqual(len(network.edges), 2)
+
+    def test_create_network_invalid_node(self):
+        with self.assertRaises(ValueError):
+            RiverNetworkBuilder.create_network(
+                3,
+                [(1, 4)]
+            )
+
+class TestSimulationService(unittest.TestCase):
+
+    def test_create_river(self):
+        service = SimulationService()
+
+        river = service.create_river(
+            4,
+            [(1, 2), (2, 3)]
+        )
+
+        self.assertEqual(len(river.nodes), 4)
+        self.assertEqual(len(river.edges), 2)
 
 if __name__ == "__main__":
     unittest.main()

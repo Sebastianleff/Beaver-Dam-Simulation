@@ -103,7 +103,7 @@ class RiverNetworkBuilder:
 
         for down, up in edges:
 
-            # VALIDATION
+            # Validation
             if down < 1 or down > node_count:
                 raise ValueError(f"Invalid downstream node: {down}")
 
