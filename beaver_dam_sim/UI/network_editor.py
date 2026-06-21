@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QMessageBox,
     QApplication,
+    QFileDialog,
     QGraphicsView,
     QGraphicsScene,
     QGraphicsEllipseItem,
@@ -17,6 +18,7 @@ from PySide6.QtCore import Qt, QLineF
 from PySide6.QtGui import QPen, QBrush
 from PySide6.QtWidgets import QGraphicsItem
 import sys
+import json
 
 from beaver_dam_sim.service import SimulationService
 
@@ -101,6 +103,11 @@ class NetworkEditor(QMainWindow):
 
         add_node_btn = QPushButton("Add Node")
         add_node_btn.clicked.connect(self.add_node)
+
+        save_btn = QPushButton("Save Network")
+        save_btn.clicked.connect(self.save_network)
+
+        button_row.addWidget(save_btn)
 
         build_btn = QPushButton("Build Network (Test)")
         build_btn.clicked.connect(self.build_network)
@@ -198,6 +205,45 @@ class NetworkEditor(QMainWindow):
 
         except ValueError as e:
             QMessageBox.critical(self, "Error", str(e))
+
+    def save_network(self):
+        """
+        Export network to JSON file.
+        """
+
+        edges = []
+
+        for edge in self.edges:
+            edges.append(
+                [
+                    edge.start_node.node_id,
+                    edge.end_node.node_id
+                ]
+            )
+
+        data = {
+            "node_count": len(self.nodes),
+            "edges": edges
+        }
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Network",
+            "",
+            "JSON Files (*.json)"
+        )
+
+        if not filename:
+            return
+
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=4)
+
+        QMessageBox.information(
+            self,
+            "Saved",
+            f"Network saved to:\n{filename}"
+        )
 
 
 # Run standalone
