@@ -1,11 +1,10 @@
 """
-Graphical River Network Editor (PySide6) - Step 10
-Node dragging + connect + save/load + arrows
+Graphical River Network Editor (PySide6) - Step 11
+Adds simulation parameter control + run simulation integration
 """
 
 import sys
 import json
-from math import sin, cos, radians
 
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -20,14 +19,16 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsEllipseItem,
     QGraphicsLineItem,
-    QGraphicsPolygonItem,
+    QFormLayout,
+    QDoubleSpinBox,
+    QSpinBox,
+    QGraphicsTextItem,
 )
-from PySide6.QtCore import Qt, QLineF, QPointF
-from PySide6.QtGui import QPen, QBrush, QPolygonF
+from PySide6.QtCore import Qt, QLineF
+from PySide6.QtGui import QPen, QBrush
 from PySide6.QtWidgets import QGraphicsItem
-from PySide6.QtWidgets import QGraphicsTextItem
 
-from beaver_dam_sim.service import SimulationService
+from beaver_dam_sim.service import SimulationService, SimParam
 
 
 # Node
@@ -47,7 +48,7 @@ class NodeItem(QGraphicsEllipseItem):
             QGraphicsEllipseItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
 
-        # LABEL
+        # label
         self.label = QGraphicsTextItem(str(node_id), self)
         self.label.setDefaultTextColor(Qt.white)
         self.label.setPos(-6, -10)
@@ -75,53 +76,24 @@ class EdgeItem(QGraphicsLineItem):
         self.end_node = end_node
 
         self.setPen(QPen(Qt.black, 2))
-
-        self.arrow_head = QGraphicsPolygonItem(self)
-        self.arrow_head.setBrush(QBrush(Qt.black))
-        self.arrow_head.setPen(QPen(Qt.black))
-
-        self.setZValue(1)
-        self.arrow_head.setZValue(2)
-
         self.update_position()
 
     def update_position(self):
-        line = QLineF(
-            self.start_node.scenePos(),
-            self.end_node.scenePos()
+        self.setLine(
+            QLineF(
+                self.start_node.scenePos(),
+                self.end_node.scenePos()
+            )
         )
 
-        self.setLine(line)
 
-        # Arrow head (fixed & stable)
-        angle = radians(-line.angle())
-        arrow_size = 10
-
-        p = self.end_node.scenePos()
-
-        p1 = QPointF(
-            p.x() + arrow_size * cos(angle),
-            p.y() + arrow_size * sin(angle)
-        )
-        p2 = QPointF(
-            p.x() + arrow_size * cos(angle + 2.5),
-            p.y() + arrow_size * sin(angle + 2.5)
-        )
-        p3 = QPointF(
-            p.x() + arrow_size * cos(angle - 2.5),
-            p.y() + arrow_size * sin(angle - 2.5)
-        )
-
-        self.arrow_head.setPolygon(QPolygonF([p1, p2, p3]))
-
-
-# Editor
+# Main Editor
 class NetworkEditor(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Beaver Dam Network Editor - Step 10")
-        self.setMinimumSize(900, 600)
+        self.setWindowTitle("Beaver Dam Network Editor - Step 11")
+        self.setMinimumSize(1000, 700)
 
         self.service = SimulationService()
 
@@ -132,42 +104,88 @@ class NetworkEditor(QMainWindow):
 
         self._build_ui()
 
+    # UI
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
 
-        layout = QVBoxLayout(central)
+        main_layout = QHBoxLayout(central)
 
-        row = QHBoxLayout()
+        # LEFT: controls
+        control_panel = QVBoxLayout()
 
-        add_btn = QPushButton("Add Node")
-        add_btn.clicked.connect(self.add_node)
+        form = QFormLayout()
 
-        del_btn = QPushButton("Delete Selected")
-        del_btn.clicked.connect(self.delete_selected)
+        self.dam_creation = QDoubleSpinBox()
+        self.dam_creation.setRange(0, 1)
+        self.dam_creation.setSingleStep(0.1)
+        self.dam_creation.setValue(0.3)
 
-        save_btn = QPushButton("Save")
+        self.dam_break = QDoubleSpinBox()
+        self.dam_break.setRange(0, 1)
+        self.dam_break.setValue(0.3)
+
+        self.flood_prob = QDoubleSpinBox()
+        self.flood_prob.setRange(0, 1)
+        self.flood_prob.setValue(0.3)
+
+        self.flood_break = QDoubleSpinBox()
+        self.flood_break.setRange(0, 1)
+        self.flood_break.setValue(0.3)
+
+        self.meadow = QDoubleSpinBox()
+        self.meadow.setRange(0, 1)
+        self.meadow.setValue(0.3)
+
+        self.steps = QSpinBox()
+        self.steps.setRange(1, 10000)
+        self.steps.setValue(50)
+
+        self.seed = QSpinBox()
+        self.seed.setRange(0, 999999)
+        self.seed.setValue(1)
+
+        self.stabilization = QSpinBox()
+        self.stabilization.setRange(0, 1000)
+        self.stabilization.setValue(3)
+
+        form.addRow("Dam Creation", self.dam_creation)
+        form.addRow("Dam Break", self.dam_break)
+        form.addRow("Flood Prob", self.flood_prob)
+        form.addRow("Flood Break", self.flood_break)
+        form.addRow("Meadow Prob", self.meadow)
+        form.addRow("Steps", self.steps)
+        form.addRow("Seed", self.seed)
+        form.addRow("Stabilization", self.stabilization)
+
+        control_panel.addLayout(form)
+
+        run_btn = QPushButton("Run Simulation")
+        run_btn.clicked.connect(self.run_simulation)
+
+        add_node_btn = QPushButton("Add Node")
+        add_node_btn.clicked.connect(self.add_node)
+
+        save_btn = QPushButton("Save Network")
         save_btn.clicked.connect(self.save_network)
 
-        load_btn = QPushButton("Load")
+        load_btn = QPushButton("Load Network")
         load_btn.clicked.connect(self.load_network)
 
-        build_btn = QPushButton("Build")
-        build_btn.clicked.connect(self.build_network)
+        control_panel.addWidget(run_btn)
+        control_panel.addWidget(add_node_btn)
+        control_panel.addWidget(save_btn)
+        control_panel.addWidget(load_btn)
 
-        row.addWidget(add_btn)
-        row.addWidget(del_btn)
-        row.addWidget(save_btn)
-        row.addWidget(load_btn)
-        row.addWidget(build_btn)
+        control_panel.addStretch()
 
-        layout.addLayout(row)
-
+        # RIGHT: scene
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         self.view.setSceneRect(0, 0, 1000, 800)
 
-        layout.addWidget(self.view)
+        main_layout.addLayout(control_panel, 1)
+        main_layout.addWidget(self.view, 3)
 
     # Nodes
     def add_node(self):
@@ -182,7 +200,7 @@ class NetworkEditor(QMainWindow):
         self.scene.addItem(node)
         self.nodes[self.node_counter] = node
 
-    # Connect logic
+    # Connect nodes
     def node_clicked(self, node):
         if self.selected_node is None:
             self.selected_node = node
@@ -193,13 +211,6 @@ class NetworkEditor(QMainWindow):
             node.setBrush(QBrush(Qt.darkCyan))
             self.selected_node = None
             return
-
-        for e in self.edges:
-            if e.start_node == self.selected_node and e.end_node == node:
-                QMessageBox.warning(self, "Duplicate", "Edge exists")
-                self.selected_node.setBrush(QBrush(Qt.darkCyan))
-                self.selected_node = None
-                return
 
         edge = EdgeItem(self.selected_node, node)
         self.scene.addItem(edge)
@@ -212,44 +223,43 @@ class NetworkEditor(QMainWindow):
         self.selected_node.setBrush(QBrush(Qt.darkCyan))
         self.selected_node = None
 
-    # Delete
-    def delete_selected(self):
-        for item in self.scene.selectedItems():
+    # Simulation (new step 11 core)
+    def run_simulation(self):
 
-            if isinstance(item, NodeItem):
-                for e in item.edges[:]:
-                    if e in self.edges:
-                        self.edges.remove(e)
-                    self.scene.removeItem(e)
+        if len(self.nodes) < 2:
+            QMessageBox.warning(self, "Error", "Need at least 2 nodes")
+            return
 
-                self.scene.removeItem(item)
-
-                if item.node_id in self.nodes:
-                    del self.nodes[item.node_id]
-
-            elif isinstance(item, EdgeItem):
-                if item in self.edges:
-                    self.edges.remove(item)
-                self.scene.removeItem(item)
-
-    # Build backend
-    def build_network(self):
         edges = [
             (e.start_node.node_id, e.end_node.node_id)
             for e in self.edges
         ]
 
+        params = SimParam(
+            dam_creation_probability=self.dam_creation.value(),
+            dam_break_probability=self.dam_break.value(),
+            flood_probability=self.flood_prob.value(),
+            flood_break_probability=self.flood_break.value(),
+            stabilization_time=self.stabilization.value(),
+            steps=self.steps.value(),
+            random_seed=self.seed.value(),
+            meadow_probability=self.meadow.value(),
+        )
+
         try:
             river = self.service.create_river(len(self.nodes), edges)
 
+            result = self.service.run_simulation(params, river)
+
             QMessageBox.information(
                 self,
-                "Success",
-                f"Nodes: {len(river.nodes)} | Edges: {len(river.edges)}"
+                "Simulation Complete",
+                f"Simulation finished!\nSteps: {len(result)}"
             )
 
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
 
     # Save / Load
     def save_network(self):
@@ -299,6 +309,7 @@ class NetworkEditor(QMainWindow):
             e = EdgeItem(self.nodes[a], self.nodes[b])
             self.scene.addItem(e)
             self.edges.append(e)
+
             self.nodes[a].edges.append(e)
             self.nodes[b].edges.append(e)
 
