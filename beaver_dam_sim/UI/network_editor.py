@@ -107,6 +107,11 @@ class NetworkEditor(QMainWindow):
         save_btn = QPushButton("Save Network")
         save_btn.clicked.connect(self.save_network)
 
+        load_btn = QPushButton("Load Network")
+        load_btn.clicked.connect(self.load_network)
+
+        button_row.addWidget(load_btn)
+
         button_row.addWidget(save_btn)
 
         build_btn = QPushButton("Build Network (Test)")
@@ -222,9 +227,18 @@ class NetworkEditor(QMainWindow):
             )
 
         data = {
-            "node_count": len(self.nodes),
+            "nodes": [],
             "edges": edges
         }
+
+        for node_id, node in self.nodes.items():
+            data["nodes"].append(
+                {
+                    "id": node_id,
+                    "x": node.scenePos().x(),
+                    "y": node.scenePos().y()
+                }
+            )
 
         filename, _ = QFileDialog.getSaveFileName(
             self,
@@ -243,6 +257,69 @@ class NetworkEditor(QMainWindow):
             self,
             "Saved",
             f"Network saved to:\n{filename}"
+        )
+
+    def load_network(self):
+        """
+        Load network from JSON file.
+        """
+
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Network",
+            "",
+            "JSON Files (*.json)"
+        )
+
+        if not filename:
+            return
+
+        with open(filename, "r") as f:
+            data = json.load(f)
+
+        # Clear current graph
+        self.scene.clear()
+
+        self.nodes.clear()
+        self.edges.clear()
+
+        self.node_counter = 0
+        self.selected_node = None
+
+        # Recreate nodes
+        for node_data in data["nodes"]:
+            node_id = node_data["id"]
+
+            node = NodeItem(
+                node_id,
+                node_data["x"],
+                node_data["y"]
+            )
+
+            self.scene.addItem(node)
+
+            self.nodes[node_id] = node
+
+            self.node_counter = max(self.node_counter, node_id)
+
+        # Recreate edges
+        for start_id, end_id in data["edges"]:
+            start_node = self.nodes[start_id]
+            end_node = self.nodes[end_id]
+
+            edge = EdgeItem(start_node, end_node)
+
+            self.scene.addItem(edge)
+
+            self.edges.append(edge)
+
+            start_node.edges.append(edge)
+            end_node.edges.append(edge)
+
+        QMessageBox.information(
+            self,
+            "Loaded",
+            f"Loaded {len(self.nodes)} nodes and {len(self.edges)} edges."
         )
 
 
