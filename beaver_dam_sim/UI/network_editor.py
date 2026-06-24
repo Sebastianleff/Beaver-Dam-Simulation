@@ -1,10 +1,14 @@
 """
-Graphical River Network Editor (PySide6) - Step 11
-Adds simulation parameter control + run simulation integration
+Graphical River Network Editor (PySide6) - Step 12
+Adds node state visualization based on simulation step data
 """
 
 import sys
 import json
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from __main__ import NetworkEditor
 
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -23,9 +27,10 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QSpinBox,
     QGraphicsTextItem,
+    QLabel
 )
 from PySide6.QtCore import Qt, QLineF
-from PySide6.QtGui import QPen, QBrush
+from PySide6.QtGui import QPen, QBrush, QColor
 from PySide6.QtWidgets import QGraphicsItem
 
 from beaver_dam_sim.service import SimulationService, SimParam
@@ -39,18 +44,18 @@ class NodeItem(QGraphicsEllipseItem):
         self.node_id = node_id
         self.edges = []
 
-        self.setBrush(QBrush(Qt.darkCyan))
-        self.setPen(QPen(Qt.black, 2))
+        self.setBrush(QBrush(Qt.GlobalColor.darkCyan))
+        self.setPen(QPen(Qt.GlobalColor.black, 2))
 
         self.setFlags(
-            QGraphicsEllipseItem.GraphicsItemFlag.ItemIsMovable |
-            QGraphicsEllipseItem.GraphicsItemFlag.ItemIsSelectable |
-            QGraphicsEllipseItem.GraphicsItemFlag.ItemSendsGeometryChanges
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
+            QGraphicsItem.GraphicsItemFlag.ItemIsSelectable |
+            QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
 
         # label
         self.label = QGraphicsTextItem(str(node_id), self)
-        self.label.setDefaultTextColor(Qt.white)
+        self.label.setDefaultTextColor(Qt.GlobalColor.white)
         self.label.setPos(-6, -10)
 
         self.setPos(x, y)
@@ -62,9 +67,22 @@ class NodeItem(QGraphicsEllipseItem):
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event):
-        editor = self.scene().views()[0].window()
+        editor = cast("NetworkEditor", self.scene().views()[0].window())
         editor.node_clicked(self)
         super().mousePressEvent(event)
+
+    def set_state(self, state: str):
+        """
+        Color the node based on its simulation state.
+        States: 'default', 'dam', 'flooded', 'meadow'
+        """
+        colors = {
+            "default": Qt.GlobalColor.darkCyan,
+            "dam":     QColor("#8B4513"),   # brown
+            "flooded": QColor("#1565C0"),   # deep blue
+            "meadow":  QColor("#2E7D32"),   # green
+        }
+        self.setBrush(QBrush(colors.get(state, Qt.GlobalColor.darkCyan)))
 
 
 # Edge
@@ -75,7 +93,7 @@ class EdgeItem(QGraphicsLineItem):
         self.start_node = start_node
         self.end_node = end_node
 
-        self.setPen(QPen(Qt.black, 2))
+        self.setPen(QPen(Qt.GlobalColor.black, 2))
         self.update_position()
 
     def update_position(self):
@@ -86,13 +104,27 @@ class EdgeItem(QGraphicsLineItem):
             )
         )
 
+    def set_state(self, state: str):
+        """
+        Color the edge based on the dominant cell state along it.
+        Priority: flooded > dam > meadow > default
+        """
+        colors = {
+            "default": Qt.GlobalColor.black,
+            "dam":     QColor("#8B4513"),
+            "flooded": QColor("#1565C0"),
+            "meadow":  QColor("#2E7D32"),
+        }
+        color = colors.get(state, Qt.GlobalColor.black)
+        self.setPen(QPen(color, 4 if state != "default" else 2))
+
 
 # Main Editor
 class NetworkEditor(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Beaver Dam Network Editor - Step 11")
+        self.setWindowTitle("Beaver Dam Network Editor - Step 12")
         self.setMinimumSize(1000, 700)
 
         self.service = SimulationService()
@@ -101,6 +133,8 @@ class NetworkEditor(QMainWindow):
         self.nodes = {}
         self.edges = []
         self.selected_node = None
+        self.simulation_history = []
+        self.current_step = 0
 
         self._build_ui()
 
@@ -166,6 +200,21 @@ class NetworkEditor(QMainWindow):
         add_node_btn = QPushButton("Add Node")
         add_node_btn.clicked.connect(self.add_node)
 
+        # Step navigation row
+        simulation_row = QHBoxLayout()
+
+        prev_btn = QPushButton("◀ Prev")
+        prev_btn.clicked.connect(self.previous_step)
+
+        next_btn = QPushButton("Next ▶")
+        next_btn.clicked.connect(self.next_step)
+
+        self.step_label = QLabel("Step: 0")
+
+        simulation_row.addWidget(prev_btn)
+        simulation_row.addWidget(next_btn)
+        simulation_row.addWidget(self.step_label)
+
         save_btn = QPushButton("Save Network")
         save_btn.clicked.connect(self.save_network)
 
@@ -173,9 +222,21 @@ class NetworkEditor(QMainWindow):
         load_btn.clicked.connect(self.load_network)
 
         control_panel.addWidget(run_btn)
+        control_panel.addLayout(simulation_row)
         control_panel.addWidget(add_node_btn)
         control_panel.addWidget(save_btn)
         control_panel.addWidget(load_btn)
+
+        # Legend
+        legend_label = QLabel(
+            "<b>Legend</b><br>"
+            "<span style='color:#00838F'>■</span> Default &nbsp;"
+            "<span style='color:#8B4513'>■</span> Dam &nbsp;"
+            "<span style='color:#1565C0'>■</span> Flooded &nbsp;"
+            "<span style='color:#2E7D32'>■</span> Meadow"
+        )
+        legend_label.setTextFormat(Qt.TextFormat.RichText)
+        control_panel.addWidget(legend_label)
 
         control_panel.addStretch()
 
@@ -204,11 +265,11 @@ class NetworkEditor(QMainWindow):
     def node_clicked(self, node):
         if self.selected_node is None:
             self.selected_node = node
-            node.setBrush(QBrush(Qt.green))
+            node.setBrush(QBrush(Qt.GlobalColor.green))
             return
 
         if self.selected_node == node:
-            node.setBrush(QBrush(Qt.darkCyan))
+            node.setBrush(QBrush(Qt.GlobalColor.darkCyan))
             self.selected_node = None
             return
 
@@ -220,10 +281,10 @@ class NetworkEditor(QMainWindow):
         self.selected_node.edges.append(edge)
         node.edges.append(edge)
 
-        self.selected_node.setBrush(QBrush(Qt.darkCyan))
+        self.selected_node.setBrush(QBrush(Qt.GlobalColor.darkCyan))
         self.selected_node = None
 
-    # Simulation (new step 11 core)
+    # Simulation
     def run_simulation(self):
 
         if len(self.nodes) < 2:
@@ -249,17 +310,79 @@ class NetworkEditor(QMainWindow):
         try:
             river = self.service.create_river(len(self.nodes), edges)
 
-            result = self.service.run_simulation(params, river)
+            self.simulation_history = self.service.run_simulation(
+                params,
+                river
+            )
+
+            self.current_step = 0
+            self.display_step()
 
             QMessageBox.information(
                 self,
                 "Simulation Complete",
-                f"Simulation finished!\nSteps: {len(result)}"
+                f"Simulation finished!\nSteps: {len(self.simulation_history)}"
             )
 
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
+    def _edge_dominant_state(self, sim_edge) -> str:
+        """
+        Determine the dominant visual state for an edge based on its cells.
+        Priority: flooded > dam > meadow > default
+        """
+        has_dam = False
+        has_meadow = False
+
+        for cell in sim_edge.cells.values():
+            if cell.flooded_step is not None:
+                return "flooded"
+            if cell.dam and not cell.dam.broken_step:
+                has_dam = True
+            if cell.dam and cell.dam.meadow:
+                has_meadow = True
+
+        if has_dam:
+            return "dam"
+        if has_meadow:
+            return "meadow"
+        return "default"
+
+    def display_step(self):
+        """
+        Display current simulation step and color edges by cell state.
+        """
+        if not self.simulation_history:
+            return
+
+        step = self.simulation_history[self.current_step]
+        river = step.river_snapshot
+
+        # Count flooded cells for the label
+        flooded_count = sum(
+            1
+            for e in river.edges
+            for c in e.cells.values()
+            if c.flooded_step is not None
+        )
+
+        self.step_label.setText(
+            f"Step: {step.step} | Flooded Cells: {flooded_count}"
+        )
+
+        # Reset all edges
+        for edge_item in self.edges:
+            edge_item.set_state("default")
+
+        # Match each UI EdgeItem to the simulation edge by node IDs
+        for sim_edge in river.edges:
+            for edge_item in self.edges:
+                a = edge_item.start_node.node_id
+                b = edge_item.end_node.node_id
+                if (a, b) == (sim_edge.down_stream_node, sim_edge.up_stream_node) or                    (b, a) == (sim_edge.down_stream_node, sim_edge.up_stream_node):
+                    edge_item.set_state(self._edge_dominant_state(sim_edge))
+                    break
 
     # Save / Load
     def save_network(self):
@@ -312,6 +435,22 @@ class NetworkEditor(QMainWindow):
 
             self.nodes[a].edges.append(e)
             self.nodes[b].edges.append(e)
+
+    def next_step(self):
+        if not self.simulation_history:
+            return
+
+        if self.current_step < len(self.simulation_history) - 1:
+            self.current_step += 1
+            self.display_step()
+
+    def previous_step(self):
+        if not self.simulation_history:
+            return
+
+        if self.current_step > 0:
+            self.current_step -= 1
+            self.display_step()
 
 
 # Run
