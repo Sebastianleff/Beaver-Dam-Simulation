@@ -462,8 +462,7 @@ class NetworkEditor(QMainWindow):
         )
 
         try:
-            river = self.service.create_river(len(self.nodes), edges)
-            self.simulation_history = self.service.run_simulation(params, river)
+            self.simulation_history = self.service.run_simulation(params, None)
             self.current_step = 0
             self.display_step()
 
@@ -509,7 +508,10 @@ class NetworkEditor(QMainWindow):
         )
 
         self.step_label.setText(
-            f"Step: {step.step} | Flooded Cells: {flooded_count}"
+            f"Step: {step.step} | "
+            f"Flooded: {len(step.cells_flooded)} | "
+            f"Dams created: {len(step.dams_created)} | "
+            f"Dams broken: {len(step.dams_broken)}"
         )
 
         for edge_item in self.edges:
