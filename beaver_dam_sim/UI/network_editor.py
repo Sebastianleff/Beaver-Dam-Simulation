@@ -1,6 +1,6 @@
 """
-Graphical River Network Editor (PySide6) - Step 13
-Adds auto-generate network from topology + size parameters
+Graphical River Network Editor (PySide6) - Step 16
+Highlights nodes that border flooded edges with a pulsing glow effect
 """
 
 import sys
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsEllipseItem,
     QGraphicsLineItem,
+    QGraphicsItem,
     QFormLayout,
     QDoubleSpinBox,
     QSpinBox,
@@ -32,21 +33,69 @@ from PySide6.QtWidgets import (
     QLabel,
     QComboBox,
     QGroupBox,
+    QSlider,
 )
-from PySide6.QtCore import Qt, QLineF
-from PySide6.QtGui import QPen, QBrush, QColor
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtCore import Qt, QLineF, QTimer, QPointF
+from PySide6.QtGui import QPen, QBrush, QColor, QRadialGradient
 
 from beaver_dam_sim.service import SimulationService, SimParam
 
 
+# Water dot
+
+class WaterDot(QGraphicsEllipseItem):
+    RADIUS = 5
+
+    def __init__(self, start: QPointF, end: QPointF, progress: float = 0.0):
+        r = self.RADIUS
+        super().__init__(-r, -r, r * 2, r * 2)
+
+        self.start = start
+        self.end = end
+        self.progress = progress
+
+        self.setBrush(QBrush(QColor("#64B5F6")))
+        self.setPen(QPen(QColor("#1565C0"), 1))
+        self.setZValue(100)  # draw above nodes
+
+        self._update_pos()
+
+    def _update_pos(self):
+        x = self.start.x() + (self.end.x() - self.start.x()) * self.progress
+        y = self.start.y() + (self.end.y() - self.start.y()) * self.progress
+        self.setPos(x, y)
+
+    def advance(self, delta: float) -> bool:
+        self.progress += delta
+        if self.progress >= 1.0:
+            self.progress -= 1.0
+        self._update_pos()
+        return False   # never clamps; caller handles wrap
+
+
 # Node
+
 class NodeItem(QGraphicsEllipseItem):
-    def __init__(self, node_id: int, x: float, y: float, radius: int = 20):
-        super().__init__(-radius, -radius, radius * 2, radius * 2)
+    RADIUS = 20
+
+    def __init__(self, node_id: int, x: float, y: float):
+        r = self.RADIUS
+        super().__init__(-r, -r, r * 2, r * 2)
 
         self.node_id = node_id
         self.edges = []
+        self._state = "default"
+
+        # Glow ring drawn behind the node
+        glow_r = r + 8
+        self._glow = QGraphicsEllipseItem(-glow_r, -glow_r, glow_r * 2, glow_r * 2, self)
+        self._glow.setPen(QPen(Qt.GlobalColor.transparent))
+        self._glow.setBrush(QBrush(Qt.GlobalColor.transparent))
+        self._glow.setZValue(-1)
+
+        # Pulse state
+        self._pulse = 0.0          # 0.0 → 1.0 → 0.0
+        self._pulse_dir = 1        # 1 = growing, -1 = shrinking
 
         self.setBrush(QBrush(Qt.GlobalColor.darkCyan))
         self.setPen(QPen(Qt.GlobalColor.black, 2))
@@ -70,11 +119,12 @@ class NodeItem(QGraphicsEllipseItem):
         return super().itemChange(change, value)
 
     def mousePressEvent(self, event):
-        editor = cast("NetworkEditor", self.scene().views()[0].window())
+        editor = cast("NetworkEditor", cast(QWidget, self.scene().views()[0].window()))
         editor.node_clicked(self)
         super().mousePressEvent(event)
 
     def set_state(self, state: str):
+        self._state = state
         colors = {
             "default": Qt.GlobalColor.darkCyan,
             "dam":     QColor("#8B4513"),
@@ -83,22 +133,72 @@ class NodeItem(QGraphicsEllipseItem):
         }
         self.setBrush(QBrush(colors.get(state, Qt.GlobalColor.darkCyan)))
 
+        if state != "flooded":
+            self._glow.setBrush(QBrush(Qt.GlobalColor.transparent))
+            self._glow.setPen(QPen(Qt.GlobalColor.transparent))
+
+    def pulse_tick(self, delta: float = 0.05):
+        """
+        Advance the pulse animation for flooded nodes.
+        Call this from the flow timer (~30 fps).
+        """
+        if self._state != "flooded":
+            return
+
+        self._pulse += self._pulse_dir * delta
+        if self._pulse >= 1.0:
+            self._pulse = 1.0
+            self._pulse_dir = -1
+        elif self._pulse <= 0.0:
+            self._pulse = 0.0
+            self._pulse_dir = 1
+
+        # Glow colour: semi-transparent blue, opacity pulses 40–180
+        alpha = int(40 + self._pulse * 140)
+        glow_color = QColor(100, 181, 246, alpha)   # #64B5F6 with variable alpha
+
+        r = self.RADIUS + 8
+        gradient = QRadialGradient(0, 0, r)
+        gradient.setColorAt(0.0, glow_color)
+        gradient.setColorAt(1.0, QColor(100, 181, 246, 0))
+
+        self._glow.setBrush(QBrush(gradient))
+        self._glow.setPen(QPen(Qt.GlobalColor.transparent))
+
 
 # Edge
+
 class EdgeItem(QGraphicsLineItem):
-    def __init__(self, start_node, end_node):
+    DOT_COUNT = 3
+    DOT_SPEED = 0.015
+
+    def __init__(self, start_node: NodeItem, end_node: NodeItem):
         super().__init__()
 
         self.start_node = start_node
         self.end_node = end_node
+        self._state = "default"
+        self._dots: list[WaterDot] = []
+
+        # Flow direction: set by display_step from sim edge ordering
+        # dots travel from flow_start → flow_end
+        self.flow_start: NodeItem = start_node
+        self.flow_end: NodeItem = end_node
 
         self.setPen(QPen(Qt.GlobalColor.black, 2))
         self.update_position()
 
     def update_position(self):
         self.setLine(QLineF(self.start_node.scenePos(), self.end_node.scenePos()))
+        for dot in self._dots:
+            dot.start = self.start_node.scenePos()
+            dot.end = self.end_node.scenePos()
 
-    def set_state(self, state: str):
+    def set_state(self, state: str, respawn_dots: bool = False):
+        if self._state == state and not respawn_dots:
+            return
+        self._state = state
+
         colors = {
             "default": Qt.GlobalColor.black,
             "dam":     QColor("#8B4513"),
@@ -108,35 +208,80 @@ class EdgeItem(QGraphicsLineItem):
         color = colors.get(state, Qt.GlobalColor.black)
         self.setPen(QPen(color, 4 if state != "default" else 2))
 
+        if state == "flooded":
+            self._spawn_dots()
+        else:
+            self._remove_dots()
+
+    def _spawn_dots(self):
+        self._remove_dots()
+        scene = self.scene()
+        if scene is None:
+            return
+        start = self.flow_start.scenePos()
+        end = self.flow_end.scenePos()
+        for i in range(self.DOT_COUNT):
+            dot = WaterDot(start, end, i / self.DOT_COUNT)
+            scene.addItem(dot)
+            self._dots.append(dot)
+
+    def _remove_dots(self):
+        scene = self.scene()
+        for dot in self._dots:
+            if scene:
+                scene.removeItem(dot)
+        self._dots.clear()
+
+    def advance_dots(self):
+        start = self.flow_start.scenePos()
+        end = self.flow_end.scenePos()
+        for dot in self._dots:
+            dot.start = start
+            dot.end = end
+            dot.progress += self.DOT_SPEED
+            if dot.progress >= 1.0:
+                dot.progress -= 1.0   # wrap instead of reset so speed stays consistent
+            dot._update_pos()
+
 
 # Main Editor
+
 class NetworkEditor(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Beaver Dam Network Editor - Step 13")
+        self.setWindowTitle("Beaver Dam Network Editor - Step 16")
         self.setMinimumSize(1100, 700)
 
         self.service = SimulationService()
 
         self.node_counter = 0
-        self.nodes = {}
-        self.edges = []
+        self.nodes: dict[int, NodeItem] = {}
+        self.edges: list[EdgeItem] = []
         self.selected_node = None
         self.simulation_history = []
         self.current_step = 0
 
+        self._sim_timer = QTimer(self)
+        self._sim_timer.timeout.connect(self._simulation_tick)
+
+        # Single flow timer drives both dots and node pulse
+        self._flow_timer = QTimer(self)
+        self._flow_timer.timeout.connect(self._flow_tick)
+        self._flow_timer.start(33)
+
         self._build_ui()
+
+    # UI
 
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
 
         main_layout = QHBoxLayout(central)
-
         control_panel = QVBoxLayout()
 
-        # Generate Network group
+        # Generate Network
         gen_group = QGroupBox("Generate Network")
         gen_form = QFormLayout()
 
@@ -151,6 +296,7 @@ class NetworkEditor(QMainWindow):
         self.gen_topology = QComboBox()
         self.gen_topology.addItems(["Linear", "Branching", "Random"])
         self.gen_topology.currentTextChanged.connect(self._update_edge_hint)
+        self.gen_node_count.valueChanged.connect(lambda _: self._update_edge_hint(self.gen_topology.currentText()))
 
         gen_form.addRow("Nodes", self.gen_node_count)
         gen_form.addRow("Edges", self.gen_edge_count)
@@ -159,7 +305,6 @@ class NetworkEditor(QMainWindow):
         self.edge_hint = QLabel("")
         self.edge_hint.setStyleSheet("color: gray; font-size: 10px;")
         gen_form.addRow("", self.edge_hint)
-
         gen_group.setLayout(gen_form)
 
         gen_btn = QPushButton("Generate Network")
@@ -168,7 +313,7 @@ class NetworkEditor(QMainWindow):
         control_panel.addWidget(gen_group)
         control_panel.addWidget(gen_btn)
 
-        # Simulation params group
+        # Simulation Parameters
         sim_group = QGroupBox("Simulation Parameters")
         form = QFormLayout()
 
@@ -217,30 +362,60 @@ class NetworkEditor(QMainWindow):
         sim_group.setLayout(form)
         control_panel.addWidget(sim_group)
 
-        # Buttons
         run_btn = QPushButton("Run Simulation")
         run_btn.clicked.connect(self.run_simulation)
+        control_panel.addWidget(run_btn)
+
+        # Playback
+        anim_group = QGroupBox("Playback")
+        anim_layout = QVBoxLayout()
+
+        playback_row = QHBoxLayout()
+        self.play_btn = QPushButton("▶ Play")
+        self.play_btn.clicked.connect(self.toggle_play)
+        self.play_btn.setEnabled(False)
+
+        stop_btn = QPushButton("■ Stop")
+        stop_btn.clicked.connect(self.stop_animation)
+
+        prev_btn = QPushButton("◀")
+        prev_btn.clicked.connect(self.previous_step)
+
+        next_btn = QPushButton("▶|")
+        next_btn.clicked.connect(self.next_step)
+
+        playback_row.addWidget(prev_btn)
+        playback_row.addWidget(self.play_btn)
+        playback_row.addWidget(stop_btn)
+        playback_row.addWidget(next_btn)
+
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(QLabel("Slow"))
+        self.speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self.speed_slider.setRange(1, 10)
+        self.speed_slider.setValue(5)
+        self.speed_slider.setTickInterval(1)
+        self.speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.speed_slider.valueChanged.connect(self._update_timer_interval)
+        speed_row.addWidget(self.speed_slider)
+        speed_row.addWidget(QLabel("Fast"))
+
+        self.step_label = QLabel("Step: 0")
+        self.step_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        anim_layout.addLayout(playback_row)
+        anim_layout.addLayout(speed_row)
+        anim_layout.addWidget(self.step_label)
+        anim_group.setLayout(anim_layout)
+        control_panel.addWidget(anim_group)
 
         add_node_btn = QPushButton("Add Node")
         add_node_btn.clicked.connect(self.add_node)
-
-        simulation_row = QHBoxLayout()
-        prev_btn = QPushButton("◀ Prev")
-        prev_btn.clicked.connect(self.previous_step)
-        next_btn = QPushButton("Next ▶")
-        next_btn.clicked.connect(self.next_step)
-        self.step_label = QLabel("Step: 0")
-        simulation_row.addWidget(prev_btn)
-        simulation_row.addWidget(next_btn)
-        simulation_row.addWidget(self.step_label)
-
         save_btn = QPushButton("Save Network")
         save_btn.clicked.connect(self.save_network)
         load_btn = QPushButton("Load Network")
         load_btn.clicked.connect(self.load_network)
 
-        control_panel.addWidget(run_btn)
-        control_panel.addLayout(simulation_row)
         control_panel.addWidget(add_node_btn)
         control_panel.addWidget(save_btn)
         control_panel.addWidget(load_btn)
@@ -250,13 +425,14 @@ class NetworkEditor(QMainWindow):
             "<span style='color:#00838F'>■</span> Default &nbsp;"
             "<span style='color:#8B4513'>■</span> Dam &nbsp;"
             "<span style='color:#1565C0'>■</span> Flooded &nbsp;"
-            "<span style='color:#2E7D32'>■</span> Meadow"
+            "<span style='color:#2E7D32'>■</span> Meadow &nbsp;"
+            "<span style='color:#64B5F6'>●</span> Water flow &nbsp;"
+            "<span style='color:#64B5F6'>◎</span> Flooded node"
         )
         legend_label.setTextFormat(Qt.TextFormat.RichText)
         control_panel.addWidget(legend_label)
         control_panel.addStretch()
 
-        # RIGHT: scene
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         self.view.setSceneRect(0, 0, 1000, 800)
@@ -266,18 +442,70 @@ class NetworkEditor(QMainWindow):
 
         self._update_edge_hint(self.gen_topology.currentText())
 
+    # Flow + pulse tick
+
+    def _flow_tick(self):
+        for edge in self.edges:
+            if edge._state == "flooded":
+                edge.advance_dots()
+        for node in self.nodes.values():
+            node.pulse_tick()
+
+    # Playback
+
+    def _timer_interval_ms(self) -> int:
+        return int(1100 - self.speed_slider.value() * 100)
+
+    def _update_timer_interval(self):
+        if self._sim_timer.isActive():
+            self._sim_timer.setInterval(self._timer_interval_ms())
+
+    def toggle_play(self):
+        if self._sim_timer.isActive():
+            self._sim_timer.stop()
+            self.play_btn.setText("▶ Play")
+        else:
+            if self.current_step >= len(self.simulation_history) - 1:
+                self.current_step = 0
+                self.display_step()
+            self._sim_timer.start(self._timer_interval_ms())
+            self.play_btn.setText("⏸ Pause")
+
+    def stop_animation(self):
+        self._sim_timer.stop()
+        self.play_btn.setText("▶ Play")
+        self.current_step = 0
+        self.display_step()
+
+    def _simulation_tick(self):
+        if self.current_step < len(self.simulation_history) - 1:
+            self.current_step += 1
+            self.display_step()
+        else:
+            self._sim_timer.stop()
+            self.play_btn.setText("▶ Play")
+
     # Network generation
 
     def _update_edge_hint(self, topology: str):
         n = self.gen_node_count.value()
         if topology == "Linear":
             self.edge_hint.setText(f"Linear uses exactly {n - 1} edges")
+            self.gen_edge_count.setValue(n - 1)
+            self.gen_edge_count.setEnabled(False)
         elif topology == "Branching":
             self.edge_hint.setText(f"Branching uses exactly {n - 1} edges")
+            self.gen_edge_count.setValue(n - 1)
+            self.gen_edge_count.setEnabled(False)
         else:
-            self.edge_hint.setText(f"Random uses the edge count you set")
+            self.edge_hint.setText("Random: set edge count freely")
+            self.gen_edge_count.setEnabled(True)
 
     def _clear_scene(self):
+        self._sim_timer.stop()
+        self.play_btn.setText("▶ Play")
+        for edge in self.edges:
+            edge._remove_dots()
         self.scene.clear()
         self.nodes.clear()
         self.edges.clear()
@@ -303,10 +531,8 @@ class NetworkEditor(QMainWindow):
     def generate_network(self):
         n = self.gen_node_count.value()
         topology = self.gen_topology.currentText()
-
         self._clear_scene()
-
-        cx, cy = 500, 400   # scene centre
+        cx, cy = 500, 400
         radius = min(300, 60 * n)
 
         if topology == "Linear":
@@ -314,28 +540,20 @@ class NetworkEditor(QMainWindow):
         elif topology == "Branching":
             self._generate_branching(n, cx, cy, radius)
         else:
-            e = self.gen_edge_count.value()
-            self._generate_random(n, e, cx, cy, radius)
+            self._generate_random(n, self.gen_edge_count.value(), cx, cy, radius)
 
     def _generate_linear(self, n: int, cx: float, cy: float):
-        """Nodes spaced evenly across the scene width, connected in a chain."""
         spacing = 800 / (n + 1)
         nodes = []
         for i in range(n):
             x = spacing * (i + 1)
-            y = cy + (20 if i % 2 else -20)   # slight zigzag
+            y = cy + (20 if i % 2 else -20)
             nodes.append(self._add_node_at(x, y))
-
         for i in range(len(nodes) - 1):
             self._add_edge_between(nodes[i], nodes[i + 1])
 
     def _generate_branching(self, n: int, cx: float, cy: float, radius: float):
-        """
-        Tree layout: root at top-centre, children spread below.
-        Mimics a river branching upstream.
-        """
-        nodes = [self._add_node_at(cx, 80)]   # root = downstream outlet
-
+        nodes = [self._add_node_at(cx, 80)]
         rng = random.Random(self.seed.value())
         level_y = 80
         current_level = [nodes[0]]
@@ -370,11 +588,6 @@ class NetworkEditor(QMainWindow):
             current_level = next_level if next_level else current_level
 
     def _generate_random(self, n: int, e: int, cx: float, cy: float, radius: float):
-        """
-        Nodes placed on a circle, edges added randomly.
-        Guarantees connectivity via a spanning chain first,
-        then adds extra edges up to the requested count.
-        """
         rng = random.Random(self.seed.value())
         nodes = []
 
@@ -384,7 +597,6 @@ class NetworkEditor(QMainWindow):
             y = cy + radius * math.sin(angle)
             nodes.append(self._add_node_at(x, y))
 
-        # Guarantee connectivity: random spanning chain
         order = list(range(n))
         rng.shuffle(order)
         existing = set()
@@ -395,7 +607,6 @@ class NetworkEditor(QMainWindow):
                 self._add_edge_between(nodes[a], nodes[b])
                 existing.add(key)
 
-        # Add extra random edges up to requested count
         attempts = 0
         while len(self.edges) < e and attempts < 500:
             a, b = rng.sample(range(n), 2)
@@ -417,7 +628,7 @@ class NetworkEditor(QMainWindow):
         self.scene.addItem(node)
         self.nodes[self.node_counter] = node
 
-    # Connect nodes by clicking
+    # Connect nodes
 
     def node_clicked(self, node):
         if self.selected_node is None:
@@ -445,10 +656,8 @@ class NetworkEditor(QMainWindow):
             QMessageBox.warning(self, "Error", "Need at least 2 nodes")
             return
 
-        edges = [
-            (e.start_node.node_id, e.end_node.node_id)
-            for e in self.edges
-        ]
+        self._sim_timer.stop()
+        self.play_btn.setText("▶ Play")
 
         params = SimParam(
             dam_creation_probability=self.dam_creation.value(),
@@ -462,20 +671,28 @@ class NetworkEditor(QMainWindow):
         )
 
         try:
-            self.simulation_history = self.service.run_simulation(params, None)
+            edges = [
+                (e.start_node.node_id, e.end_node.node_id)
+                for e in self.edges
+            ]
+            river = self.service.create_river(len(self.nodes), edges)
+            self.simulation_history = self.service.run_simulation(params, river)
             self.current_step = 0
+            self.play_btn.setEnabled(True)
             self.display_step()
 
             QMessageBox.information(
                 self,
                 "Simulation Complete",
-                f"Simulation finished!\nSteps: {len(self.simulation_history)}"
+                f"Simulation finished!\nSteps: {len(self.simulation_history)}\n"
+                "Press ▶ Play to animate."
             )
 
         except Exception as ex:
             QMessageBox.critical(self, "Error", str(ex))
 
-    def _edge_dominant_state(self, sim_edge) -> str:
+    @staticmethod
+    def _edge_dominant_state(sim_edge) -> str:
         has_dam = False
         has_meadow = False
 
@@ -500,31 +717,42 @@ class NetworkEditor(QMainWindow):
         step = self.simulation_history[self.current_step]
         river = step.river_snapshot
 
-        flooded_count = sum(
-            1
-            for e in river.edges
-            for c in e.cells.values()
-            if c.flooded_step is not None
-        )
-
         self.step_label.setText(
-            f"Step: {step.step} | "
-            f"Flooded: {len(step.cells_flooded)} | "
-            f"Dams created: {len(step.dams_created)} | "
-            f"Dams broken: {len(step.dams_broken)}"
+            f"Step: {step.step} / {len(self.simulation_history) - 1}  |  "
+            f"Flooded: {len(step.cells_flooded)}  |  "
+            f"Dams: +{len(step.dams_created)} / -{len(step.dams_broken)}"
         )
 
+        # Reset all edges and nodes
         for edge_item in self.edges:
             edge_item.set_state("default")
+        for node in self.nodes.values():
+            node.set_state("default")
+
+        # Track which nodes border a flooded edge
+        flooded_node_ids: set[int] = set()
 
         for sim_edge in river.edges:
+            state = self._edge_dominant_state(sim_edge)
             for edge_item in self.edges:
                 a = edge_item.start_node.node_id
                 b = edge_item.end_node.node_id
                 if (a, b) == (sim_edge.down_stream_node, sim_edge.up_stream_node) or \
                    (b, a) == (sim_edge.down_stream_node, sim_edge.up_stream_node):
-                    edge_item.set_state(self._edge_dominant_state(sim_edge))
+                    # Set flow direction: upstream → downstream
+                    if sim_edge.up_stream_node in self.nodes and sim_edge.down_stream_node in self.nodes:
+                        edge_item.flow_start = self.nodes[sim_edge.up_stream_node]
+                        edge_item.flow_end = self.nodes[sim_edge.down_stream_node]
+                    edge_item.set_state(state, respawn_dots=(state == "flooded"))
+                    if state == "flooded":
+                        flooded_node_ids.add(a)
+                        flooded_node_ids.add(b)
                     break
+
+        # Highlight nodes that border flooded edges
+        for node_id in flooded_node_ids:
+            if node_id in self.nodes:
+                self.nodes[node_id].set_state("flooded")
 
     # Save / Load
 
@@ -588,6 +816,7 @@ class NetworkEditor(QMainWindow):
 
 
 # Run
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     w = NetworkEditor()
