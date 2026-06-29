@@ -7,6 +7,7 @@ import sys
 import json
 import math
 import random
+from collections import deque, defaultdict
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QGraphicsLineItem,
     QGraphicsItem,
     QFormLayout,
+    QGridLayout,
     QDoubleSpinBox,
     QSpinBox,
     QGraphicsTextItem,
@@ -259,6 +261,7 @@ class NetworkEditor(QMainWindow):
         self.nodes: dict[int, NodeItem] = {}
         self.edges: list[EdgeItem] = []
         self.selected_node = None
+        self._add_edge_mode = False
         self.simulation_history = []
         self.current_step = 0
 
@@ -270,6 +273,7 @@ class NetworkEditor(QMainWindow):
         self._flow_timer.timeout.connect(self._flow_tick)
         self._flow_timer.start(33)
 
+        self.resize(1280, 720)
         self._build_ui()
 
     # UI
@@ -279,17 +283,32 @@ class NetworkEditor(QMainWindow):
         self.setCentralWidget(central)
 
         main_layout = QHBoxLayout(central)
-        control_panel = QVBoxLayout()
+        main_layout.setSpacing(4)
+        main_layout.setContentsMargins(6, 6, 6, 6)
 
-        # Generate Network
+        control_panel = QVBoxLayout()
+        control_panel.setSpacing(4)
+
+        # Row 1: Generate Network + Simulation Parameters side by side
+        top_row = QHBoxLayout()
+        top_row.setSpacing(4)
+
+        def _spin(widget, width=72):
+            widget.setMinimumWidth(width)
+            return widget
+
+        # Generate Network (left column)
         gen_group = QGroupBox("Generate Network")
         gen_form = QFormLayout()
+        gen_form.setVerticalSpacing(2)
+        gen_form.setHorizontalSpacing(4)
+        gen_form.setContentsMargins(4, 4, 4, 4)
 
-        self.gen_node_count = QSpinBox()
+        self.gen_node_count = _spin(QSpinBox())
         self.gen_node_count.setRange(2, 50)
         self.gen_node_count.setValue(6)
 
-        self.gen_edge_count = QSpinBox()
+        self.gen_edge_count = _spin(QSpinBox())
         self.gen_edge_count.setRange(1, 100)
         self.gen_edge_count.setValue(5)
 
@@ -298,77 +317,105 @@ class NetworkEditor(QMainWindow):
         self.gen_topology.currentTextChanged.connect(self._update_edge_hint)
         self.gen_node_count.valueChanged.connect(lambda _: self._update_edge_hint(self.gen_topology.currentText()))
 
+        self.edge_hint = QLabel("")
+        self.edge_hint.setStyleSheet("color: gray; font-size: 9px;")
+        self.edge_hint.setWordWrap(True)
+
         gen_form.addRow("Nodes", self.gen_node_count)
         gen_form.addRow("Edges", self.gen_edge_count)
         gen_form.addRow("Topology", self.gen_topology)
-
-        self.edge_hint = QLabel("")
-        self.edge_hint.setStyleSheet("color: gray; font-size: 10px;")
         gen_form.addRow("", self.edge_hint)
         gen_group.setLayout(gen_form)
 
-        gen_btn = QPushButton("Generate Network")
-        gen_btn.clicked.connect(self.generate_network)
-
-        control_panel.addWidget(gen_group)
-        control_panel.addWidget(gen_btn)
-
-        # Simulation Parameters
+        # Simulation Parameters (right column)
         sim_group = QGroupBox("Simulation Parameters")
-        form = QFormLayout()
+        sim_form = QFormLayout()
+        sim_form.setVerticalSpacing(2)
+        sim_form.setHorizontalSpacing(4)
+        sim_form.setContentsMargins(4, 4, 4, 4)
 
-        self.dam_creation = QDoubleSpinBox()
+        self.dam_creation = _spin(QDoubleSpinBox())
         self.dam_creation.setRange(0, 1)
         self.dam_creation.setSingleStep(0.1)
         self.dam_creation.setValue(0.3)
 
-        self.dam_break = QDoubleSpinBox()
+        self.dam_break = _spin(QDoubleSpinBox())
         self.dam_break.setRange(0, 1)
         self.dam_break.setValue(0.3)
 
-        self.flood_prob = QDoubleSpinBox()
+        self.flood_prob = _spin(QDoubleSpinBox())
         self.flood_prob.setRange(0, 1)
         self.flood_prob.setValue(0.3)
 
-        self.flood_break = QDoubleSpinBox()
+        self.flood_break = _spin(QDoubleSpinBox())
         self.flood_break.setRange(0, 1)
         self.flood_break.setValue(0.3)
 
-        self.meadow = QDoubleSpinBox()
+        self.meadow = _spin(QDoubleSpinBox())
         self.meadow.setRange(0, 1)
         self.meadow.setValue(0.3)
 
-        self.steps = QSpinBox()
+        self.steps = _spin(QSpinBox())
         self.steps.setRange(1, 10000)
         self.steps.setValue(50)
 
-        self.seed = QSpinBox()
+        self.seed = _spin(QSpinBox())
         self.seed.setRange(0, 999999)
         self.seed.setValue(1)
 
-        self.stabilization = QSpinBox()
+        self.stabilization = _spin(QSpinBox())
         self.stabilization.setRange(0, 1000)
         self.stabilization.setValue(3)
 
-        form.addRow("Dam Creation", self.dam_creation)
-        form.addRow("Dam Break", self.dam_break)
-        form.addRow("Flood Prob", self.flood_prob)
-        form.addRow("Flood Break", self.flood_break)
-        form.addRow("Meadow Prob", self.meadow)
-        form.addRow("Steps", self.steps)
-        form.addRow("Seed", self.seed)
-        form.addRow("Stabilization", self.stabilization)
+        sim_form.addRow("Dam Creation", self.dam_creation)
+        sim_form.addRow("Dam Break", self.dam_break)
+        sim_form.addRow("Flood Prob", self.flood_prob)
+        sim_form.addRow("Flood Break", self.flood_break)
+        sim_form.addRow("Meadow Prob", self.meadow)
+        sim_form.addRow("Steps", self.steps)
+        sim_form.addRow("Seed", self.seed)
+        sim_form.addRow("Stabilization", self.stabilization)
+        sim_group.setLayout(sim_form)
 
-        sim_group.setLayout(form)
-        control_panel.addWidget(sim_group)
+        top_row.addWidget(gen_group, 0, Qt.AlignmentFlag.AlignTop)
+        top_row.addWidget(sim_group, 0, Qt.AlignmentFlag.AlignTop)
+        control_panel.addLayout(top_row)
 
-        run_btn = QPushButton("Run Simulation")
+        # Row 2: action buttons in one line
+        action_row = QHBoxLayout()
+        action_row.setSpacing(4)
+
+        gen_btn = QPushButton("Generate")
+        gen_btn.clicked.connect(self.generate_network)
+
+        run_btn = QPushButton("Run Sim")
         run_btn.clicked.connect(self.run_simulation)
-        control_panel.addWidget(run_btn)
 
-        # Playback
+        layout_btn = QPushButton("Auto-Layout")
+        layout_btn.clicked.connect(self.auto_layout_by_flow)
+
+        add_node_btn = QPushButton("Add Node")
+        add_node_btn.clicked.connect(self.add_node)
+
+        self.add_edge_btn = QPushButton("Add Edge")
+        self.add_edge_btn.setCheckable(True)
+        self.add_edge_btn.clicked.connect(self._toggle_add_edge_mode)
+
+        save_btn = QPushButton("Save")
+        save_btn.clicked.connect(self.save_network)
+
+        load_btn = QPushButton("Load")
+        load_btn.clicked.connect(self.load_network)
+
+        for btn in (gen_btn, run_btn, layout_btn, add_node_btn, self.add_edge_btn, save_btn, load_btn):
+            action_row.addWidget(btn)
+
+        control_panel.addLayout(action_row)
+
+        # Row 3: Playback
         anim_group = QGroupBox("Playback")
         anim_layout = QVBoxLayout()
+        anim_layout.setSpacing(3)
 
         playback_row = QHBoxLayout()
         self.play_btn = QPushButton("▶ Play")
@@ -409,36 +456,26 @@ class NetworkEditor(QMainWindow):
         anim_group.setLayout(anim_layout)
         control_panel.addWidget(anim_group)
 
-        add_node_btn = QPushButton("Add Node")
-        add_node_btn.clicked.connect(self.add_node)
-        save_btn = QPushButton("Save Network")
-        save_btn.clicked.connect(self.save_network)
-        load_btn = QPushButton("Load Network")
-        load_btn.clicked.connect(self.load_network)
-
-        control_panel.addWidget(add_node_btn)
-        control_panel.addWidget(save_btn)
-        control_panel.addWidget(load_btn)
-
+        # Row 4: Legend
         legend_label = QLabel(
-            "<b>Legend</b><br>"
+            "<b>Legend</b> &nbsp;"
             "<span style='color:#00838F'>■</span> Default &nbsp;"
             "<span style='color:#8B4513'>■</span> Dam &nbsp;"
             "<span style='color:#1565C0'>■</span> Flooded &nbsp;"
             "<span style='color:#2E7D32'>■</span> Meadow &nbsp;"
-            "<span style='color:#64B5F6'>●</span> Water flow &nbsp;"
+            "<span style='color:#64B5F6'>●</span> Flow &nbsp;"
             "<span style='color:#64B5F6'>◎</span> Flooded node"
         )
         legend_label.setTextFormat(Qt.TextFormat.RichText)
+        legend_label.setWordWrap(True)
         control_panel.addWidget(legend_label)
-        control_panel.addStretch()
 
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
         self.view.setSceneRect(0, 0, 1000, 800)
 
-        main_layout.addLayout(control_panel, 1)
-        main_layout.addWidget(self.view, 3)
+        main_layout.addLayout(control_panel)
+        main_layout.addWidget(self.view, 1)
 
         self._update_edge_hint(self.gen_topology.currentText())
 
@@ -543,11 +580,12 @@ class NetworkEditor(QMainWindow):
             self._generate_random(n, self.gen_edge_count.value(), cx, cy, radius)
 
     def _generate_linear(self, n: int, cx: float, cy: float):
-        spacing = 800 / (n + 1)
+        """Linear chain laid out top-to-bottom like a single-branch tree."""
+        y_step = 700 / (n + 1)
         nodes = []
         for i in range(n):
-            x = spacing * (i + 1)
-            y = cy + (20 if i % 2 else -20)
+            x = cx + (30 if i % 2 else -30)   # slight zigzag so it doesn't look like a ruler
+            y = 80 + y_step * i
             nodes.append(self._add_node_at(x, y))
         for i in range(len(nodes) - 1):
             self._add_edge_between(nodes[i], nodes[i + 1])
@@ -588,18 +626,32 @@ class NetworkEditor(QMainWindow):
             current_level = next_level if next_level else current_level
 
     def _generate_random(self, n: int, e: int, cx: float, cy: float, radius: float):
+        """Random edges, but nodes laid out in branching-style levels top-to-bottom."""
         rng = random.Random(self.seed.value())
-        nodes = []
 
-        for i in range(n):
-            angle = 2 * math.pi * i / n
-            x = cx + radius * math.cos(angle)
-            y = cy + radius * math.sin(angle)
-            nodes.append(self._add_node_at(x, y))
+        # Assign nodes to levels randomly (like a rough tree depth)
+        max_level = max(2, n // 3)
+        level_assign: dict[int, list[int]] = defaultdict(list)
+        level_assign[0].append(0)
+        for i in range(1, n):
+            level_assign[rng.randint(1, max_level)].append(i)
 
+        # Position by level
+        scene_w, scene_h = 900, 720
+        levels = sorted(level_assign.keys())
+        y_step = scene_h / (len(levels) + 1)
+        nodes = [None] * n
+        for lvl in levels:
+            ids = level_assign[lvl]
+            x_step = scene_w / (len(ids) + 1)
+            y = 80 + y_step * lvl
+            for j, node_idx in enumerate(ids):
+                nodes[node_idx] = self._add_node_at(x_step * (j + 1), y)
+
+        # Ensure connectivity with a random spanning path, then add extra edges
         order = list(range(n))
         rng.shuffle(order)
-        existing = set()
+        existing: set[tuple[int, int]] = set()
         for i in range(len(order) - 1):
             a, b = order[i], order[i + 1]
             key = (min(a, b), max(a, b))
@@ -630,14 +682,25 @@ class NetworkEditor(QMainWindow):
 
     # Connect nodes
 
+    def _toggle_add_edge_mode(self, checked: bool):
+        self._add_edge_mode = checked
+        self.add_edge_btn.setText("Add Edge" if checked else "Add Edge")
+        # Cancel any pending node selection when toggling off
+        if not checked and self.selected_node:
+            self.selected_node.set_state(self.selected_node._state)
+            self.selected_node = None
+
     def node_clicked(self, node):
+        if not self._add_edge_mode:
+            return
+
         if self.selected_node is None:
             self.selected_node = node
             node.setBrush(QBrush(Qt.GlobalColor.green))
             return
 
         if self.selected_node == node:
-            node.setBrush(QBrush(Qt.GlobalColor.darkCyan))
+            node.set_state(node._state)
             self.selected_node = None
             return
 
@@ -646,8 +709,60 @@ class NetworkEditor(QMainWindow):
         self.edges.append(edge)
         self.selected_node.edges.append(edge)
         node.edges.append(edge)
-        self.selected_node.setBrush(QBrush(Qt.GlobalColor.darkCyan))
+        self.selected_node.set_state(self.selected_node._state)
         self.selected_node = None
+
+    # Auto-layout
+
+    def auto_layout_by_flow(self):
+        """Position nodes so upstream nodes appear higher (smaller y) than downstream ones."""
+        if not self.simulation_history:
+            QMessageBox.warning(self, "No Simulation", "Run a simulation first to determine flow direction.")
+            return
+
+        river = self.simulation_history[self.current_step].river_snapshot
+
+        # Build downstream adjacency and in-degree from sim edges
+        downstream: dict[int, list[int]] = {nid: [] for nid in self.nodes}
+        in_degree: dict[int, int] = {nid: 0 for nid in self.nodes}
+
+        for sim_edge in river.edges:
+            u = sim_edge.up_stream_node
+            d = sim_edge.down_stream_node
+            if u in downstream and d in downstream:
+                downstream[u].append(d)
+                in_degree[d] += 1
+
+        # Kahn's algorithm to assign depth levels
+        depth: dict[int, int] = {}
+        queue = deque(nid for nid, deg in in_degree.items() if deg == 0)
+        while queue:
+            nid = queue.popleft()
+            for child in downstream[nid]:
+                depth[child] = max(depth.get(child, 0), depth.get(nid, 0) + 1)
+                in_degree[child] -= 1
+                if in_degree[child] == 0:
+                    queue.append(child)
+
+        # Group nodes by depth level
+        levels: dict[int, list[int]] = defaultdict(list)
+        for nid in self.nodes:
+            levels[depth.get(nid, 0)].append(nid)
+
+        # Position nodes: depth 0 (most upstream) at top, deeper = lower y
+        scene_width = self.view.sceneRect().width()
+        scene_height = self.view.sceneRect().height()
+        max_depth = max(levels.keys()) if levels else 0
+        y_step = scene_height / (max_depth + 2)
+
+        for level, node_ids in levels.items():
+            y = y_step * (level + 1)
+            x_step = scene_width / (len(node_ids) + 1)
+            for i, nid in enumerate(sorted(node_ids)):
+                self.nodes[nid].setPos(x_step * (i + 1), y)
+
+        for edge in self.edges:
+            edge.update_position()
 
     # Simulation
 
@@ -820,5 +935,5 @@ class NetworkEditor(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     w = NetworkEditor()
-    w.show()
+    w.showMaximized()
     sys.exit(app.exec())
