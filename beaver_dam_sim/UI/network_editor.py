@@ -1,6 +1,9 @@
 """
-Graphical River Network Editor (PySide6) - Step 16
-Highlights nodes that border flooded edges with a pulsing glow effect
+Graphical River Network Editor (PySide6) - Step 17
+Highlights nodes that border flooded edges with a pulsing glow effect.
+Settings are stacked vertically with full labels; playback is a compact
+vertical column docked beside the legend so the graph view gets more room.
+Auto-layout adds zigzag/jitter so chains don't render as straight lines.
 """
 
 import sys
@@ -252,7 +255,7 @@ class NetworkEditor(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Beaver Dam Network Editor - Step 16")
+        self.setWindowTitle("Beaver Dam Network Editor - Step 17")
         self.setMinimumSize(1100, 700)
 
         self.service = SimulationService()
@@ -288,21 +291,19 @@ class NetworkEditor(QMainWindow):
 
         control_panel = QVBoxLayout()
         control_panel.setSpacing(4)
-
-        # Row 1: Generate Network + Simulation Parameters side by side
-        top_row = QHBoxLayout()
-        top_row.setSpacing(4)
+        control_panel.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         def _spin(widget, width=72):
             widget.setMinimumWidth(width)
             return widget
 
-        # Generate Network (left column)
+        # Settings: stacked vertically (not side-by-side) so the control
+        # panel stays narrow and the graph view gets more horizontal room.
         gen_group = QGroupBox("Generate Network")
         gen_form = QFormLayout()
-        gen_form.setVerticalSpacing(2)
-        gen_form.setHorizontalSpacing(4)
-        gen_form.setContentsMargins(4, 4, 4, 4)
+        gen_form.setVerticalSpacing(3)
+        gen_form.setHorizontalSpacing(6)
+        gen_form.setContentsMargins(6, 6, 6, 6)
 
         self.gen_node_count = _spin(QSpinBox())
         self.gen_node_count.setRange(2, 50)
@@ -321,18 +322,17 @@ class NetworkEditor(QMainWindow):
         self.edge_hint.setStyleSheet("color: gray; font-size: 9px;")
         self.edge_hint.setWordWrap(True)
 
-        gen_form.addRow("Nodes", self.gen_node_count)
-        gen_form.addRow("Edges", self.gen_edge_count)
+        gen_form.addRow("Node Count", self.gen_node_count)
+        gen_form.addRow("Edge Count", self.gen_edge_count)
         gen_form.addRow("Topology", self.gen_topology)
         gen_form.addRow("", self.edge_hint)
         gen_group.setLayout(gen_form)
 
-        # Simulation Parameters (right column)
         sim_group = QGroupBox("Simulation Parameters")
         sim_form = QFormLayout()
-        sim_form.setVerticalSpacing(2)
-        sim_form.setHorizontalSpacing(4)
-        sim_form.setContentsMargins(4, 4, 4, 4)
+        sim_form.setVerticalSpacing(3)
+        sim_form.setHorizontalSpacing(6)
+        sim_form.setContentsMargins(6, 6, 6, 6)
 
         self.dam_creation = _spin(QDoubleSpinBox())
         self.dam_creation.setRange(0, 1)
@@ -367,24 +367,21 @@ class NetworkEditor(QMainWindow):
         self.stabilization.setRange(0, 1000)
         self.stabilization.setValue(3)
 
-        sim_form.addRow("Dam Creation", self.dam_creation)
-        sim_form.addRow("Dam Break", self.dam_break)
-        sim_form.addRow("Flood Prob", self.flood_prob)
-        sim_form.addRow("Flood Break", self.flood_break)
-        sim_form.addRow("Meadow Prob", self.meadow)
-        sim_form.addRow("Steps", self.steps)
-        sim_form.addRow("Seed", self.seed)
-        sim_form.addRow("Stabilization", self.stabilization)
+        sim_form.addRow("Dam Creation Probability", self.dam_creation)
+        sim_form.addRow("Dam Break Probability", self.dam_break)
+        sim_form.addRow("Flood Probability", self.flood_prob)
+        sim_form.addRow("Flood Break Probability", self.flood_break)
+        sim_form.addRow("Meadow Probability", self.meadow)
+        sim_form.addRow("Simulation Steps", self.steps)
+        sim_form.addRow("Random Seed", self.seed)
+        sim_form.addRow("Stabilization Time", self.stabilization)
         sim_group.setLayout(sim_form)
 
-        top_row.addWidget(gen_group, 0, Qt.AlignmentFlag.AlignTop)
-        top_row.addWidget(sim_group, 0, Qt.AlignmentFlag.AlignTop)
-        control_panel.addLayout(top_row)
+        control_panel.addWidget(gen_group)
+        control_panel.addWidget(sim_group)
 
-        # Row 2: action buttons in one line
-        action_row = QHBoxLayout()
-        action_row.setSpacing(4)
-
+        # Action buttons: 2-column grid so full labels stay readable in a
+        # narrow panel instead of being squeezed into one wide row.
         gen_btn = QPushButton("Generate")
         gen_btn.clicked.connect(self.generate_network)
 
@@ -407,17 +404,34 @@ class NetworkEditor(QMainWindow):
         load_btn = QPushButton("Load")
         load_btn.clicked.connect(self.load_network)
 
-        for btn in (gen_btn, run_btn, layout_btn, add_node_btn, self.add_edge_btn, save_btn, load_btn):
-            action_row.addWidget(btn)
+        action_grid = QGridLayout()
+        action_grid.setSpacing(4)
 
-        control_panel.addLayout(action_row)
+        action_buttons = [gen_btn, run_btn, layout_btn, add_node_btn, self.add_edge_btn, save_btn, load_btn]
+        cols = 2
+        for i, btn in enumerate(action_buttons):
+            action_grid.addWidget(btn, i // cols, i % cols)
 
-        # Row 3: Playback
+        control_panel.addLayout(action_grid)
+
+        # Playback: compact vertical column instead of wide horizontal rows,
+        # with the legend docked beside it to use the leftover space.
+        playback_and_legend_row = QHBoxLayout()
+        playback_and_legend_row.setSpacing(6)
+
         anim_group = QGroupBox("Playback")
         anim_layout = QVBoxLayout()
         anim_layout.setSpacing(3)
 
-        playback_row = QHBoxLayout()
+        nav_row = QHBoxLayout()
+        nav_row.setSpacing(2)
+        prev_btn = QPushButton("◀")
+        prev_btn.clicked.connect(self.previous_step)
+        next_btn = QPushButton("▶|")
+        next_btn.clicked.connect(self.next_step)
+        nav_row.addWidget(prev_btn)
+        nav_row.addWidget(next_btn)
+
         self.play_btn = QPushButton("▶ Play")
         self.play_btn.clicked.connect(self.toggle_play)
         self.play_btn.setEnabled(False)
@@ -425,50 +439,50 @@ class NetworkEditor(QMainWindow):
         stop_btn = QPushButton("■ Stop")
         stop_btn.clicked.connect(self.stop_animation)
 
-        prev_btn = QPushButton("◀")
-        prev_btn.clicked.connect(self.previous_step)
+        speed_label_row = QHBoxLayout()
+        speed_label_row.addWidget(QLabel("Speed"))
+        speed_label_row.addStretch()
 
-        next_btn = QPushButton("▶|")
-        next_btn.clicked.connect(self.next_step)
-
-        playback_row.addWidget(prev_btn)
-        playback_row.addWidget(self.play_btn)
-        playback_row.addWidget(stop_btn)
-        playback_row.addWidget(next_btn)
-
-        speed_row = QHBoxLayout()
-        speed_row.addWidget(QLabel("Slow"))
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
         self.speed_slider.setRange(1, 10)
         self.speed_slider.setValue(5)
         self.speed_slider.setTickInterval(1)
         self.speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.speed_slider.valueChanged.connect(self._update_timer_interval)
-        speed_row.addWidget(self.speed_slider)
-        speed_row.addWidget(QLabel("Fast"))
 
         self.step_label = QLabel("Step: 0")
         self.step_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.step_label.setWordWrap(True)
 
-        anim_layout.addLayout(playback_row)
-        anim_layout.addLayout(speed_row)
+        anim_layout.addLayout(nav_row)
+        anim_layout.addWidget(self.play_btn)
+        anim_layout.addWidget(stop_btn)
+        anim_layout.addLayout(speed_label_row)
+        anim_layout.addWidget(self.speed_slider)
         anim_layout.addWidget(self.step_label)
         anim_group.setLayout(anim_layout)
-        control_panel.addWidget(anim_group)
+        anim_group.setMaximumWidth(140)
 
-        # Row 4: Legend
+        legend_group = QGroupBox("Legend")
+        legend_layout = QVBoxLayout()
+        legend_layout.setSpacing(2)
         legend_label = QLabel(
-            "<b>Legend</b> &nbsp;"
-            "<span style='color:#00838F'>■</span> Default &nbsp;"
-            "<span style='color:#8B4513'>■</span> Dam &nbsp;"
-            "<span style='color:#1565C0'>■</span> Flooded &nbsp;"
-            "<span style='color:#2E7D32'>■</span> Meadow &nbsp;"
-            "<span style='color:#64B5F6'>●</span> Flow &nbsp;"
+            "<span style='color:#00838F'>■</span> Default<br>"
+            "<span style='color:#8B4513'>■</span> Dam<br>"
+            "<span style='color:#1565C0'>■</span> Flooded<br>"
+            "<span style='color:#2E7D32'>■</span> Meadow<br>"
+            "<span style='color:#64B5F6'>●</span> Flow<br>"
             "<span style='color:#64B5F6'>◎</span> Flooded node"
         )
         legend_label.setTextFormat(Qt.TextFormat.RichText)
         legend_label.setWordWrap(True)
-        control_panel.addWidget(legend_label)
+        legend_layout.addWidget(legend_label)
+        legend_group.setLayout(legend_layout)
+
+        playback_and_legend_row.addWidget(anim_group)
+        playback_and_legend_row.addWidget(legend_group, 1)
+
+        control_panel.addLayout(playback_and_legend_row)
 
         self.scene = QGraphicsScene()
         self.view = QGraphicsView(self.scene)
@@ -749,32 +763,32 @@ class NetworkEditor(QMainWindow):
         for nid in self.nodes:
             levels[depth.get(nid, 0)].append(nid)
 
-            # Position nodes: depth 0 (most upstream) at top, deeper = lower y
-            scene_width = self.view.sceneRect().width()
-            scene_height = self.view.sceneRect().height()
-            max_depth = max(levels.keys()) if levels else 0
-            y_step = scene_height / (max_depth + 2)
+        # Position nodes: depth 0 (most upstream) at top, deeper = lower y
+        scene_width = self.view.sceneRect().width()
+        scene_height = self.view.sceneRect().height()
+        max_depth = max(levels.keys()) if levels else 0
+        y_step = scene_height / (max_depth + 2)
 
-            # Seeded RNG so the layout is reproducible but not a straight line,
-            # even when each level only contains a single node (e.g. Linear topology).
-            rng = random.Random(self.seed.value())
-            jitter_amplitude = min(80.0, scene_width * 0.12)
+        # Seeded RNG so the layout is reproducible but not a straight line,
+        # even when each level only contains a single node (e.g. Linear topology).
+        rng = random.Random(self.seed.value())
+        jitter_amplitude = min(80.0, scene_width * 0.12)
 
-            for level, node_ids in levels.items():
-                y = y_step * (level + 1)
-                x_step = scene_width / (len(node_ids) + 1)
-                for i, nid in enumerate(sorted(node_ids)):
-                    base_x = x_step * (i + 1)
-                    # Zigzag bias alternates left/right by level so chains snake
-                    # back and forth instead of forming a vertical line.
-                    zigzag = jitter_amplitude * (1 if level % 2 == 0 else -1)
-                    random_offset = rng.uniform(-jitter_amplitude * 0.5, jitter_amplitude * 0.5)
-                    x = base_x + zigzag * 0.6 + random_offset
-                    x = max(40.0, min(scene_width - 40.0, x))
-                    self.nodes[nid].setPos(x, y)
+        for level, node_ids in levels.items():
+            y = y_step * (level + 1)
+            x_step = scene_width / (len(node_ids) + 1)
+            for i, nid in enumerate(sorted(node_ids)):
+                base_x = x_step * (i + 1)
+                # Zigzag bias alternates left/right by level so chains snake
+                # back and forth instead of forming a vertical line.
+                zigzag = jitter_amplitude * (1 if level % 2 == 0 else -1)
+                random_offset = rng.uniform(-jitter_amplitude * 0.5, jitter_amplitude * 0.5)
+                x = base_x + zigzag * 0.6 + random_offset
+                x = max(40.0, min(scene_width - 40.0, x))
+                self.nodes[nid].setPos(x, y)
 
-            for edge in self.edges:
-                edge.update_position()
+        for edge in self.edges:
+            edge.update_position()
 
     # Simulation
 
@@ -845,8 +859,8 @@ class NetworkEditor(QMainWindow):
         river = step.river_snapshot
 
         self.step_label.setText(
-            f"Step: {step.step} / {len(self.simulation_history) - 1}  |  "
-            f"Flooded: {len(step.cells_flooded)}  |  "
+            f"Step: {step.step} / {len(self.simulation_history) - 1}\n"
+            f"Flooded: {len(step.cells_flooded)}\n"
             f"Dams: +{len(step.dams_created)} / -{len(step.dams_broken)}"
         )
 
