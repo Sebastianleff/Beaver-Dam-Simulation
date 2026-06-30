@@ -541,13 +541,13 @@ class NetworkEditor(QMainWindow):
     def _update_edge_hint(self, topology: str):
         n = self.gen_node_count.value()
         if topology == "Linear":
-            self.edge_hint.setText(f"Linear uses exactly {n - 1} edges")
+            self.edge_hint.setText(f"Linear suggests {n - 1} edges (chain); override if you want extra links")
             self.gen_edge_count.setValue(n - 1)
-            self.gen_edge_count.setEnabled(False)
+            self.gen_edge_count.setEnabled(True)
         elif topology == "Branching":
-            self.edge_hint.setText(f"Branching uses exactly {n - 1} edges")
+            self.edge_hint.setText(f"Branching suggests {n - 1} edges (tree); override if you want extra links")
             self.gen_edge_count.setValue(n - 1)
-            self.gen_edge_count.setEnabled(False)
+            self.gen_edge_count.setEnabled(True)
         else:
             self.edge_hint.setText("Random: set edge count freely")
             self.gen_edge_count.setEnabled(True)
@@ -587,28 +587,47 @@ class NetworkEditor(QMainWindow):
         radius = min(300, 60 * n)
 
         if topology == "Linear":
-            self._generate_linear(n, cx, cy)
+            self._generate_linear(n, cx, cy, self.gen_edge_count.value())
         elif topology == "Branching":
-            self._generate_branching(n, cx, cy, radius)
+            self._generate_branching(n, cx, cy, radius, self.gen_edge_count.value())
         else:
             self._generate_random(n, self.gen_edge_count.value(), cx, cy, radius)
 
-    def _generate_linear(self, n: int, cx: float, cy: float):
-        """Linear chain laid out top-to-bottom like a single-branch tree."""
+    def _generate_linear(self, n: int, cx: float, cy: float, edge_count: int | None = None):
+        """Linear chain laid out top-to-bottom like a single-branch tree.
+        If edge_count exceeds the base chain (n - 1), extra random edges
+        are added between non-adjacent nodes."""
         y_step = 700 / (n + 1)
         nodes = []
         for i in range(n):
             x = cx + (30 if i % 2 else -30)   # slight zigzag so it doesn't look like a ruler
             y = 80 + y_step * i
             nodes.append(self._add_node_at(x, y))
+
+        existing: set[tuple[int, int]] = set()
         for i in range(len(nodes) - 1):
             self._add_edge_between(nodes[i], nodes[i + 1])
+            existing.add((nodes[i].node_id, nodes[i + 1].node_id))
 
-    def _generate_branching(self, n: int, cx: float, cy: float, radius: float):
+        target = edge_count if edge_count is not None else (n - 1)
+        rng = random.Random(self.seed.value())
+        attempts = 0
+        while len(self.edges) < target and attempts < 500 and n >= 2:
+            a, b = rng.sample(nodes, 2)
+            key = (min(a.node_id, b.node_id), max(a.node_id, b.node_id))
+            if key not in existing:
+                self._add_edge_between(a, b)
+                existing.add(key)
+            attempts += 1
+
+    def _generate_branching(self, n: int, cx: float, cy: float, radius: float, edge_count: int | None = None):
+        """If edge_count exceeds the base tree (n - 1), extra random edges
+        are added between non-adjacent nodes."""
         nodes = [self._add_node_at(cx, 80)]
         rng = random.Random(self.seed.value())
         level_y = 80
         current_level = [nodes[0]]
+        existing: set[tuple[int, int]] = set()
 
         while len(nodes) < n:
             next_level = []
@@ -627,6 +646,7 @@ class NetworkEditor(QMainWindow):
                 nodes.append(child)
                 next_level.append(child)
                 self._add_edge_between(parent, child)
+                existing.add((min(parent.node_id, child.node_id), max(parent.node_id, child.node_id)))
 
                 if len(nodes) < n and i + len(current_level) < slots:
                     child2 = self._add_node_at(
@@ -636,8 +656,19 @@ class NetworkEditor(QMainWindow):
                     nodes.append(child2)
                     next_level.append(child2)
                     self._add_edge_between(parent, child2)
+                    existing.add((min(parent.node_id, child2.node_id), max(parent.node_id, child2.node_id)))
 
             current_level = next_level if next_level else current_level
+
+        target = edge_count if edge_count is not None else (n - 1)
+        attempts = 0
+        while len(self.edges) < target and attempts < 500 and n >= 2:
+            a, b = rng.sample(nodes, 2)
+            key = (min(a.node_id, b.node_id), max(a.node_id, b.node_id))
+            if key not in existing:
+                self._add_edge_between(a, b)
+                existing.add(key)
+            attempts += 1
 
     def _generate_random(self, n: int, e: int, cx: float, cy: float, radius: float):
         """Random edges, but nodes laid out in branching-style levels top-to-bottom."""
