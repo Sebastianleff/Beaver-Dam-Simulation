@@ -749,20 +749,32 @@ class NetworkEditor(QMainWindow):
         for nid in self.nodes:
             levels[depth.get(nid, 0)].append(nid)
 
-        # Position nodes: depth 0 (most upstream) at top, deeper = lower y
-        scene_width = self.view.sceneRect().width()
-        scene_height = self.view.sceneRect().height()
-        max_depth = max(levels.keys()) if levels else 0
-        y_step = scene_height / (max_depth + 2)
+            # Position nodes: depth 0 (most upstream) at top, deeper = lower y
+            scene_width = self.view.sceneRect().width()
+            scene_height = self.view.sceneRect().height()
+            max_depth = max(levels.keys()) if levels else 0
+            y_step = scene_height / (max_depth + 2)
 
-        for level, node_ids in levels.items():
-            y = y_step * (level + 1)
-            x_step = scene_width / (len(node_ids) + 1)
-            for i, nid in enumerate(sorted(node_ids)):
-                self.nodes[nid].setPos(x_step * (i + 1), y)
+            # Seeded RNG so the layout is reproducible but not a straight line,
+            # even when each level only contains a single node (e.g. Linear topology).
+            rng = random.Random(self.seed.value())
+            jitter_amplitude = min(80.0, scene_width * 0.12)
 
-        for edge in self.edges:
-            edge.update_position()
+            for level, node_ids in levels.items():
+                y = y_step * (level + 1)
+                x_step = scene_width / (len(node_ids) + 1)
+                for i, nid in enumerate(sorted(node_ids)):
+                    base_x = x_step * (i + 1)
+                    # Zigzag bias alternates left/right by level so chains snake
+                    # back and forth instead of forming a vertical line.
+                    zigzag = jitter_amplitude * (1 if level % 2 == 0 else -1)
+                    random_offset = rng.uniform(-jitter_amplitude * 0.5, jitter_amplitude * 0.5)
+                    x = base_x + zigzag * 0.6 + random_offset
+                    x = max(40.0, min(scene_width - 40.0, x))
+                    self.nodes[nid].setPos(x, y)
+
+            for edge in self.edges:
+                edge.update_position()
 
     # Simulation
 
