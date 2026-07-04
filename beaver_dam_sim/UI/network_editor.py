@@ -1,6 +1,6 @@
 """
 Graphical River Network Editor (PySide6) - Step 18
-
+================================================================
 This build turns the editor into a dedicated GRAPH EDITOR only.
 All simulation execution / playback controls have been removed
 (see NETWORK_EDITOR.md, "Scope change in Step 18" for the full
@@ -24,6 +24,18 @@ New in this step:
     engine structure (a chain of cells per edge, where dams/floods/
     meadows occur) is visible directly in the editor.
   * Node/edge deletion.
+
+Step 19 adds the "summonable" API a host window (main_window.py) needs:
+  * NetworkEditor(initial_data=...) can be constructed pre-loaded.
+  * NetworkEditor.to_dict() / load_from_dict() expose the graph as
+    plain data, independent of file dialogs, for a host window to
+    read/write directly.
+  * NetworkEditor.closed signal fires (with the final to_dict()) when
+    the editor window is closed, so a host window can pick up the
+    latest edits without polling.
+  * is_valid_tree(data) is a standalone helper so a host window can
+    validate/describe a saved network without instantiating a
+    QGraphicsScene at all.
 """
 
 import sys
@@ -68,11 +80,13 @@ from PySide6.QtGui import (
     QKeySequence,
     QShortcut,
 )
-from PySide6.QtCore import Qt, QLineF, QPointF
+from PySide6.QtCore import Qt, QLineF, QPointF, Signal
 import math
 
 
+# ---------------------------------------------------------------
 # Node
+# ---------------------------------------------------------------
 
 class NodeItem(QGraphicsEllipseItem):
     """A river-network node (junction, source, or outlet).
@@ -140,7 +154,9 @@ class NodeItem(QGraphicsEllipseItem):
             self.setPen(QPen(self.BORDER_DEFAULT, 2))
 
 
+# ---------------------------------------------------------------
 # Edge
+# ---------------------------------------------------------------
 
 class EdgeItem(QGraphicsLineItem):
     """A directed river-network edge: water flows from upstream_node
@@ -233,7 +249,66 @@ class EdgeItem(QGraphicsLineItem):
             painter.drawEllipse(pt, self.CELL_RADIUS, self.CELL_RADIUS)
 
 
+# ---------------------------------------------------------------
+# Standalone validation helper (works on plain dict data -- no
+# QGraphicsScene required -- so a host window can validate/describe
+# a saved network without constructing a NetworkEditor).
+# ---------------------------------------------------------------
+
+def is_valid_tree(data: dict) -> tuple[bool, str]:
+    """Check whether `data` (in NetworkEditor.to_dict() shape, or the
+    legacy [a, b]-edge-pair shape) describes a single valid river tree:
+    every node has at most one downstream edge, there are no cycles,
+    the graph is fully connected, and there is exactly one outlet."""
+    nodes = data.get("nodes", [])
+    edges = data.get("edges", [])
+    node_ids = [n["id"] for n in nodes]
+
+    if not node_ids:
+        return False, "Network is empty."
+
+    def edge_pair(e):
+        if isinstance(e, dict):
+            return e["upstream"], e["downstream"]
+        return e[0], e[1]
+
+    downstream_of: dict[int, int] = {}
+    for e in edges:
+        up, down = edge_pair(e)
+        if up in downstream_of:
+            return False, f"Node {up} has more than one downstream connection."
+        downstream_of[up] = down
+
+    if len(edges) != len(node_ids) - 1:
+        return False, f"{len(node_ids)} nodes but {len(edges)} edges (a single tree needs exactly N-1)."
+
+    adjacency: dict[int, list[int]] = defaultdict(list)
+    for e in edges:
+        up, down = edge_pair(e)
+        adjacency[up].append(down)
+        adjacency[down].append(up)
+
+    visited = {node_ids[0]}
+    queue = deque([node_ids[0]])
+    while queue:
+        current = queue.popleft()
+        for neighbor in adjacency[current]:
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append(neighbor)
+    if len(visited) != len(node_ids):
+        return False, "Network is not fully connected."
+
+    roots = [nid for nid in node_ids if nid not in downstream_of]
+    if len(roots) != 1:
+        return False, f"Found {len(roots)} outlets; a valid network has exactly one."
+
+    return True, f"Valid tree — outlet at Node {roots[0]}."
+
+
+# ---------------------------------------------------------------
 # Main Editor
+# ---------------------------------------------------------------
 
 class NetworkEditor(QMainWindow):
     """A dedicated graph-editing tool for building river networks.
@@ -247,10 +322,15 @@ class NetworkEditor(QMainWindow):
 
     SAVE_FORMAT_VERSION = 2
 
-    def __init__(self):
+    # Emitted with self.to_dict() when the editor window closes, so a
+    # host window (e.g. main_window.py) can pick up the latest edits
+    # without polling.
+    closed = Signal(dict)
+
+    def __init__(self, initial_data: dict | None = None):
         super().__init__()
 
-        self.setWindowTitle("Beaver Dam Network Editor - Step 18")
+        self.setWindowTitle("Beaver Dam Network Editor - Step 19")
         self.setMinimumSize(1000, 650)
 
         self.node_counter = 0
@@ -263,7 +343,16 @@ class NetworkEditor(QMainWindow):
         self.resize(1200, 700)
         self._build_ui()
 
+        if initial_data:
+            self.load_from_dict(initial_data)
+
+    def closeEvent(self, event):
+        self.closed.emit(self.to_dict())
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------
     # UI
+    # ------------------------------------------------------------
 
     def _build_ui(self):
         central = QWidget()
@@ -281,7 +370,7 @@ class NetworkEditor(QMainWindow):
             widget.setMinimumWidth(width)
             return widget
 
-        # Generate Network
+        # --- Generate Network ---
         gen_group = QGroupBox("Generate Network")
         gen_form = QFormLayout()
         gen_form.setVerticalSpacing(3)
@@ -319,7 +408,7 @@ class NetworkEditor(QMainWindow):
         gen_group.setLayout(gen_form)
         control_panel.addWidget(gen_group)
 
-        # Actions
+        # --- Actions ---
         gen_btn = QPushButton("Generate")
         gen_btn.clicked.connect(self.generate_network)
 
@@ -350,7 +439,7 @@ class NetworkEditor(QMainWindow):
             action_grid.addWidget(btn, i // cols, i % cols)
         control_panel.addLayout(action_grid)
 
-        # Edge Properties
+        # --- Edge Properties ---
         edge_group = QGroupBox("Edge Properties")
         edge_layout = QVBoxLayout()
         edge_layout.setSpacing(3)
@@ -370,13 +459,13 @@ class NetworkEditor(QMainWindow):
         edge_group.setLayout(edge_layout)
         control_panel.addWidget(edge_group)
 
-        # Status
+        # --- Status ---
         self.status_label = QLabel("Empty network")
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("font-size: 10px;")
         control_panel.addWidget(self.status_label)
 
-        # Legend
+        # --- Legend ---
         legend_group = QGroupBox("Legend")
         legend_layout = QVBoxLayout()
         legend_layout.setSpacing(2)
@@ -393,7 +482,7 @@ class NetworkEditor(QMainWindow):
         legend_group.setLayout(legend_layout)
         control_panel.addWidget(legend_group)
 
-        # Scene / View
+        # --- Scene / View ---
         self.scene = QGraphicsScene()
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self.view = QGraphicsView(self.scene)
@@ -406,8 +495,9 @@ class NetworkEditor(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self.delete_selected)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self.delete_selected)
 
-
+    # ------------------------------------------------------------
     # Tree-topology validation
+    # ------------------------------------------------------------
 
     def _downstream_edge_of(self, node_id: int) -> EdgeItem | None:
         """The single edge (if any) for which node_id is the upstream end."""
@@ -501,8 +591,9 @@ class NetworkEditor(QMainWindow):
         for node in self.nodes.values():
             node.set_highlight("root" if node.node_id in root_ids else "default")
 
-
+    # ------------------------------------------------------------
     # Node / edge creation & deletion
+    # ------------------------------------------------------------
 
     def _add_node_at(self, x: float, y: float) -> NodeItem:
         self.node_counter += 1
@@ -598,7 +689,9 @@ class NetworkEditor(QMainWindow):
         self.node_counter = 0
         self.status_label.setText("Empty network")
 
+    # ------------------------------------------------------------
     # Edge properties panel
+    # ------------------------------------------------------------
 
     def _on_selection_changed(self):
         edges_selected = [i for i in self.scene.selectedItems() if isinstance(i, EdgeItem)]
@@ -621,8 +714,9 @@ class NetworkEditor(QMainWindow):
         if self._editing_edge is not None:
             self._editing_edge.set_length(value)
 
-
+    # ------------------------------------------------------------
     # Network generation (always produces a single valid tree)
+    # ------------------------------------------------------------
 
     def generate_network(self):
         n = self.gen_node_count.value()
@@ -683,8 +777,9 @@ class NetworkEditor(QMainWindow):
             self._add_edge_between(node, target, length)
             existing_ids.append(node.node_id)
 
-
+    # ------------------------------------------------------------
     # Auto-layout (purely structural -- no simulation needed)
+    # ------------------------------------------------------------
 
     def _compute_depths(self) -> dict[int, int]:
         """Depth = number of hops to this node's outlet, following its
@@ -741,14 +836,14 @@ class NetworkEditor(QMainWindow):
         for edge in self.edges:
             edge.update_position()
 
+    # ------------------------------------------------------------
     # Save / Load
+    # ------------------------------------------------------------
 
-    def save_network(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save", "", "JSON (*.json)")
-        if not path:
-            return
-
-        data = {
+    def to_dict(self) -> dict:
+        """Export the current graph as plain data (no Qt objects), for
+        file saving or for a host window to read directly."""
+        return {
             "version": self.SAVE_FORMAT_VERSION,
             "nodes": [
                 {"id": n.node_id, "x": n.scenePos().x(), "y": n.scenePos().y()}
@@ -764,29 +859,20 @@ class NetworkEditor(QMainWindow):
             ],
         }
 
-        with open(path, "w") as f:
-            json.dump(data, f, indent=4)
-
-    def load_network(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load", "", "JSON (*.json)")
-        if not path:
-            return
-
-        with open(path, "r") as f:
-            data = json.load(f)
-
+    def load_from_dict(self, data: dict):
+        """Replace the current graph with the one described by data
+        (same shape as to_dict()). Also accepts the legacy Step-17
+        edge format: a plain [a, b] pair, treated as
+        upstream=a, downstream=b, with the default cell length."""
         self._clear_scene()
 
-        for n in data["nodes"]:
+        for n in data.get("nodes", []):
             node = NodeItem(n["id"], n["x"], n["y"])
             self.scene.addItem(node)
             self.nodes[n["id"]] = node
             self.node_counter = max(self.node_counter, n["id"])
 
-        for edge_data in data["edges"]:
-            # Support both the current dict format and the legacy
-            # Step-17 [a, b] pair format (treated as upstream, downstream
-            # with the default cell length).
+        for edge_data in data.get("edges", []):
             if isinstance(edge_data, dict):
                 up_id = edge_data["upstream"]
                 down_id = edge_data["downstream"]
@@ -804,8 +890,25 @@ class NetworkEditor(QMainWindow):
         self._refresh_node_highlights()
         self._update_tree_status()
 
+    def save_network(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save", "", "JSON (*.json)")
+        if not path:
+            return
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=4)
 
+    def load_network(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load", "", "JSON (*.json)")
+        if not path:
+            return
+        with open(path, "r") as f:
+            data = json.load(f)
+        self.load_from_dict(data)
+
+
+# ---------------------------------------------------------------
 # Run
+# ---------------------------------------------------------------
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
