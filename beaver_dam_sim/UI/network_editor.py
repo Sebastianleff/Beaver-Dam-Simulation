@@ -1,6 +1,6 @@
 """
 Graphical River Network Editor (PySide6) - Step 18
-================================================================
+
 This build turns the editor into a dedicated GRAPH EDITOR only.
 All simulation execution / playback controls have been removed
 (see NETWORK_EDITOR.md, "Scope change in Step 18" for the full
@@ -84,9 +84,7 @@ from PySide6.QtCore import Qt, QLineF, QPointF, Signal
 import math
 
 
-# ---------------------------------------------------------------
 # Node
-# ---------------------------------------------------------------
 
 class NodeItem(QGraphicsEllipseItem):
     """A river-network node (junction, source, or outlet).
@@ -154,9 +152,7 @@ class NodeItem(QGraphicsEllipseItem):
             self.setPen(QPen(self.BORDER_DEFAULT, 2))
 
 
-# ---------------------------------------------------------------
 # Edge
-# ---------------------------------------------------------------
 
 class EdgeItem(QGraphicsLineItem):
     """A directed river-network edge: water flows from upstream_node
@@ -249,11 +245,9 @@ class EdgeItem(QGraphicsLineItem):
             painter.drawEllipse(pt, self.CELL_RADIUS, self.CELL_RADIUS)
 
 
-# ---------------------------------------------------------------
 # Standalone validation helper (works on plain dict data -- no
 # QGraphicsScene required -- so a host window can validate/describe
 # a saved network without constructing a NetworkEditor).
-# ---------------------------------------------------------------
 
 def is_valid_tree(data: dict) -> tuple[bool, str]:
     """Check whether `data` (in NetworkEditor.to_dict() shape, or the
@@ -306,9 +300,7 @@ def is_valid_tree(data: dict) -> tuple[bool, str]:
     return True, f"Valid tree — outlet at Node {roots[0]}."
 
 
-# ---------------------------------------------------------------
 # Main Editor
-# ---------------------------------------------------------------
 
 class NetworkEditor(QMainWindow):
     """A dedicated graph-editing tool for building river networks.
@@ -350,9 +342,8 @@ class NetworkEditor(QMainWindow):
         self.closed.emit(self.to_dict())
         super().closeEvent(event)
 
-    # ------------------------------------------------------------
+
     # UI
-    # ------------------------------------------------------------
 
     def _build_ui(self):
         central = QWidget()
@@ -370,7 +361,7 @@ class NetworkEditor(QMainWindow):
             widget.setMinimumWidth(width)
             return widget
 
-        # --- Generate Network ---
+        # Generate Network
         gen_group = QGroupBox("Generate Network")
         gen_form = QFormLayout()
         gen_form.setVerticalSpacing(3)
@@ -408,7 +399,7 @@ class NetworkEditor(QMainWindow):
         gen_group.setLayout(gen_form)
         control_panel.addWidget(gen_group)
 
-        # --- Actions ---
+        # Actions
         gen_btn = QPushButton("Generate")
         gen_btn.clicked.connect(self.generate_network)
 
@@ -439,7 +430,7 @@ class NetworkEditor(QMainWindow):
             action_grid.addWidget(btn, i // cols, i % cols)
         control_panel.addLayout(action_grid)
 
-        # --- Edge Properties ---
+        # Edge Properties
         edge_group = QGroupBox("Edge Properties")
         edge_layout = QVBoxLayout()
         edge_layout.setSpacing(3)
@@ -459,13 +450,13 @@ class NetworkEditor(QMainWindow):
         edge_group.setLayout(edge_layout)
         control_panel.addWidget(edge_group)
 
-        # --- Status ---
+        # Status
         self.status_label = QLabel("Empty network")
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("font-size: 10px;")
         control_panel.addWidget(self.status_label)
 
-        # --- Legend ---
+        # Legend
         legend_group = QGroupBox("Legend")
         legend_layout = QVBoxLayout()
         legend_layout.setSpacing(2)
@@ -482,7 +473,7 @@ class NetworkEditor(QMainWindow):
         legend_group.setLayout(legend_layout)
         control_panel.addWidget(legend_group)
 
-        # --- Scene / View ---
+        # Scene / View
         self.scene = QGraphicsScene()
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self.view = QGraphicsView(self.scene)
@@ -495,9 +486,8 @@ class NetworkEditor(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Delete), self, activated=self.delete_selected)
         QShortcut(QKeySequence(Qt.Key.Key_Backspace), self, activated=self.delete_selected)
 
-    # ------------------------------------------------------------
+
     # Tree-topology validation
-    # ------------------------------------------------------------
 
     def _downstream_edge_of(self, node_id: int) -> EdgeItem | None:
         """The single edge (if any) for which node_id is the upstream end."""
@@ -591,9 +581,8 @@ class NetworkEditor(QMainWindow):
         for node in self.nodes.values():
             node.set_highlight("root" if node.node_id in root_ids else "default")
 
-    # ------------------------------------------------------------
+
     # Node / edge creation & deletion
-    # ------------------------------------------------------------
 
     def _add_node_at(self, x: float, y: float) -> NodeItem:
         self.node_counter += 1
@@ -689,9 +678,8 @@ class NetworkEditor(QMainWindow):
         self.node_counter = 0
         self.status_label.setText("Empty network")
 
-    # ------------------------------------------------------------
+
     # Edge properties panel
-    # ------------------------------------------------------------
 
     def _on_selection_changed(self):
         edges_selected = [i for i in self.scene.selectedItems() if isinstance(i, EdgeItem)]
@@ -714,9 +702,8 @@ class NetworkEditor(QMainWindow):
         if self._editing_edge is not None:
             self._editing_edge.set_length(value)
 
-    # ------------------------------------------------------------
+
     # Network generation (always produces a single valid tree)
-    # ------------------------------------------------------------
 
     def generate_network(self):
         n = self.gen_node_count.value()
@@ -777,9 +764,8 @@ class NetworkEditor(QMainWindow):
             self._add_edge_between(node, target, length)
             existing_ids.append(node.node_id)
 
-    # ------------------------------------------------------------
+
     # Auto-layout (purely structural -- no simulation needed)
-    # ------------------------------------------------------------
 
     def _compute_depths(self) -> dict[int, int]:
         """Depth = number of hops to this node's outlet, following its
@@ -836,9 +822,8 @@ class NetworkEditor(QMainWindow):
         for edge in self.edges:
             edge.update_position()
 
-    # ------------------------------------------------------------
+
     # Save / Load
-    # ------------------------------------------------------------
 
     def to_dict(self) -> dict:
         """Export the current graph as plain data (no Qt objects), for
@@ -906,9 +891,7 @@ class NetworkEditor(QMainWindow):
         self.load_from_dict(data)
 
 
-# ---------------------------------------------------------------
 # Run
-# ---------------------------------------------------------------
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

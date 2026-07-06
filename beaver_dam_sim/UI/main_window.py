@@ -1,28 +1,37 @@
 """
-Beaver Dam Simulator - Main Application Window - Step 19
+Beaver Dam Simulator - Main Application Window - Step 20
 
-This is the shell that will eventually host the whole application:
+This is the shell that hosts the whole application:
 
     Main Window
         |
-        +-- Graph Editor        (network_editor.NetworkEditor)
+        +-- Graph Editor        (ui.network_editor.NetworkEditor)
         |
-        +-- Simulation Controls (not yet built -- placeholder button)
+        +-- Simulation Controls (ui.simulation_controls.SimulationControls)
         |
         +-- Results Viewer      (not yet built -- placeholder button)
 
-The Main Window owns the canonical current network as plain data
+Package layout:
+
+    ui/
+    |-- __init__.py
+    |-- main_window.py          (this file)
+    |-- network_editor.py       (Step 18/19 -- graph editing only)
+    |-- simulation_controls.py  (Step 20 -- SimParam + run a single sim)
+    |-- batch_ui.py             (Step 20 -- CSV batch runs)
+
+The Main Window owns the *canonical* current network as plain data
 (the same shape as NetworkEditor.to_dict()) rather than owning any
 QGraphicsScene itself. It "summons" NetworkEditor when the user wants
-to build/edit a network, hands it the current data to preload, and
-picks the edited data back up via NetworkEditor's `closed` signal when
-the editor window is closed. This keeps NetworkEditor fully decoupled
-from the main window -- it can still be run standalone (see its own
-`if __name__ == "__main__"` block) with no change in behavior.
+to build/edit a network, and it "summons" SimulationControls when the
+user wants to run a simulation against that network -- handing it the
+current network data and picking up the resulting `history` via a
+signal, the same pattern used for the editor's `closed` signal.
 
-Running a simulation and viewing results are explicitly out of scope
-here -- see NETWORK_EDITOR.md, "Future work". The corresponding
-buttons are wired up but show a "coming soon" message.
+Works both as a package module (`python -m ui.main_window` from the
+project root, or `from ui.main_window import MainWindow` elsewhere)
+and as a loose script run directly from inside the `ui/` folder
+(`python main_window.py`) -- see the import fallback just below.
 """
 
 import sys
@@ -42,7 +51,18 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QAction, QKeySequence
 
-from network_editor import NetworkEditor, is_valid_tree
+# Relative import when this file is used as part of the `ui` package
+# (python -m ui.main_window, or `from ui.main_window import MainWindow`);
+# falls back to a flat sibling import when run directly as a loose
+# script from inside the ui/ folder (python main_window.py). Both
+# branches are ordinary imports, so IDEs can resolve whichever one
+# matches how the project is actually opened.
+try:
+    from .network_editor import NetworkEditor, is_valid_tree
+    from .simulation_controls import SimulationControls
+except ImportError:
+    from network_editor import NetworkEditor, is_valid_tree
+    from simulation_controls import SimulationControls
 
 EMPTY_NETWORK: dict = {"version": NetworkEditor.SAVE_FORMAT_VERSION, "nodes": [], "edges": []}
 
@@ -68,9 +88,14 @@ class MainWindow(QMainWindow):
         # so re-clicking "Open Network Editor" can just raise it.
         self._editor: NetworkEditor | None = None
 
+        # Same pattern for Simulation Controls.
+        self._sim_controls: SimulationControls | None = None
+        self.simulation_history: list | None = None
+
         self._build_menus()
         self._build_ui()
         self._refresh_status()
+
 
     # UI
 
@@ -128,7 +153,7 @@ class MainWindow(QMainWindow):
         self.open_editor_btn.clicked.connect(self.open_network_editor)
 
         self.run_sim_btn = QPushButton("Run Simulation")
-        self.run_sim_btn.clicked.connect(self.run_simulation_placeholder)
+        self.run_sim_btn.clicked.connect(self.open_simulation_controls)
 
         self.view_results_btn = QPushButton("View Results")
         self.view_results_btn.clicked.connect(self.view_results_placeholder)
@@ -164,10 +189,15 @@ class MainWindow(QMainWindow):
 
         self.status_label.setText(
             f"{n_nodes} node(s), {n_edges} edge(s) \u2014 {location}\n{validity}"
+            + (
+                f"\nLast simulation: {len(self.simulation_history)} steps."
+                if self.simulation_history
+                else ""
+            )
         )
 
         self.run_sim_btn.setEnabled(n_nodes > 0)
-        self.view_results_btn.setEnabled(False)  # no results exist until Simulation Controls ships
+        self.view_results_btn.setEnabled(bool(self.simulation_history))
 
 
     # Summoning the Graph Editor
@@ -185,6 +215,7 @@ class MainWindow(QMainWindow):
     def _on_editor_closed(self, data: dict):
         self.network_data = data
         self._refresh_status()
+        self._sync_open_sim_controls()
 
     def _pull_latest_from_editor_if_open(self):
         """If the editor is currently open, sync its live graph back
@@ -193,15 +224,50 @@ class MainWindow(QMainWindow):
         if self._editor is not None and self._editor.isVisible():
             self.network_data = self._editor.to_dict()
 
+    def _sync_open_sim_controls(self):
+        """Push the current network_data into an already-open
+        Simulation Controls window, mirroring the live-refresh pattern
+        used for the editor."""
+        if self._sim_controls is not None and self._sim_controls.isVisible():
+            self._sim_controls.set_network_data(self.network_data)
+
+
+    # Summoning Simulation Controls
+
+    def open_simulation_controls(self):
+        self._pull_latest_from_editor_if_open()
+
+        if not self.network_data or not self.network_data.get("nodes"):
+            QMessageBox.information(
+                self, "No Network", "Build or load a network first (Open Network Editor)."
+            )
+            return
+
+        if self._sim_controls is not None and self._sim_controls.isVisible():
+            self._sim_controls.set_network_data(self.network_data)
+            self._sim_controls.raise_()
+            self._sim_controls.activateWindow()
+            return
+
+        self._sim_controls = SimulationControls(self.network_data)
+        self._sim_controls.simulation_complete.connect(self._on_simulation_complete)
+        self._sim_controls.show()
+
+    def _on_simulation_complete(self, history: list):
+        self.simulation_history = history
+        self._refresh_status()
+
 
     # File menu actions
 
     def new_network(self):
         self.network_data = dict(EMPTY_NETWORK)
         self.network_file_path = None
+        self.simulation_history = None
         self._refresh_status()
         if self._editor is not None and self._editor.isVisible():
             self._editor.load_from_dict(self.network_data)
+        self._sync_open_sim_controls()
 
     def open_network_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Network", "", "JSON (*.json)")
@@ -216,9 +282,11 @@ class MainWindow(QMainWindow):
 
         self.network_data = data
         self.network_file_path = path
+        self.simulation_history = None
         self._refresh_status()
         if self._editor is not None and self._editor.isVisible():
             self._editor.load_from_dict(data)
+        self._sync_open_sim_controls()
 
     def save_network_file(self):
         if self.network_file_path:
@@ -251,23 +319,20 @@ class MainWindow(QMainWindow):
 
     # Placeholders for future panels
 
-    def run_simulation_placeholder(self):
-        QMessageBox.information(
-            self,
-            "Coming Soon",
-            "The Simulation Controls panel hasn't been built yet.\n\n"
-            "It will let you set SimParam values and run single or "
-            "batch simulations against the current network.",
-        )
-
     def view_results_placeholder(self):
+        detail = (
+            f"Last run: {len(self.simulation_history)} steps.\n\n"
+            if self.simulation_history
+            else ""
+        )
         QMessageBox.information(
             self,
             "Coming Soon",
-            "The Results Viewer hasn't been built yet.\n\n"
+            f"{detail}The Results Viewer hasn't been built yet.\n\n"
             "It will restore the playback/animation (flooded edges, "
             "pulsing nodes) that was removed from the Graph Editor in "
-            "Step 18.",
+            "Step 18, driven by the simulation history now stored on "
+            "MainWindow.simulation_history.",
         )
 
 
