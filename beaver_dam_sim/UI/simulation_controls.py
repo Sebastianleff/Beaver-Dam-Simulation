@@ -9,8 +9,9 @@ It receives the current network as plain data from MainWindow (the
 same shape as NetworkEditor.to_dict()), builds a SimParam from the
 form fields, builds a RiverNetwork via SimulationService.create_river,
 runs SimulationService.run_simulation, and emits the resulting
-`history` via the `simulation_complete` signal so MainWindow (and,
-later, the Results Viewer) can pick it up.
+`history` (together with the network_data it was run against) via the
+`simulation_complete` signal so MainWindow can pick it up and hand
+both to the Results Viewer (ui/results_viewer.py, Step 21).
 
 Works both as a package module (`python -m ui.simulation_controls` from
 the project root) and as a loose script run directly from inside the
@@ -67,6 +68,14 @@ def build_river(service: SimulationService, network_data: dict):
     would either misassign nodes or raise a "not in range" ValueError.
     We remap ids to a contiguous 1..N range (preserving the tree
     structure) before calling create_river.
+
+    Note for ui/results_viewer.py: this remapping only matters for
+    RiverNetworkBuilder's validation -- it does NOT affect how a
+    RiverNetwork's edges line up with network_data's edges. Both this
+    function and RiverNetworkBuilder.create_network preserve list
+    order when building river.edges from network_data["edges"], so a
+    later SimulationStep.river_snapshot.edges[i] always corresponds
+    positionally to network_data["edges"][i], regardless of node ids.
     """
     node_ids = sorted(n["id"] for n in network_data.get("nodes", []))
     remap = {old_id: new_id for new_id, old_id in enumerate(node_ids, start=1)}
@@ -87,10 +96,13 @@ class SimulationControls(QMainWindow):
     """Set SimParam values and run a simulation against a network
     handed to it by MainWindow. Does not touch graph editing at all."""
 
-    # Emitted with the resulting list[SimulationStep] once a run (or
-    # each batch run) finishes, so a host window / future Results
-    # Viewer can pick it up.
-    simulation_complete = Signal(list)
+    # Emitted once a run finishes with the resulting list[SimulationStep]
+    # and the exact network_data it was run against (a plain dict, same
+    # shape as NetworkEditor.to_dict()), so a host window / the Results
+    # Viewer can render the run correctly even if the "live" network
+    # data on MainWindow has since changed (e.g. the editor was reopened
+    # and edited after this run started).
+    simulation_complete = Signal(list, dict)
 
     def __init__(self, network_data: dict | None = None):
         super().__init__()
@@ -262,7 +274,10 @@ class SimulationControls(QMainWindow):
 
         self.simulation_history = history
         self._show_summary(history)
-        self.simulation_complete.emit(history)
+        # Emit the network_data this specific run used, not whatever
+        # self.network_data happens to be later -- keeps the Results
+        # Viewer correct even if the network is edited again afterward.
+        self.simulation_complete.emit(history, self.network_data)
 
     def _show_summary(self, history: list):
         total_flooded = sum(len(s.cells_flooded) for s in history)

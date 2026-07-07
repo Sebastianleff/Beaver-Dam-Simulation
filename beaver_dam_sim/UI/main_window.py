@@ -1,5 +1,5 @@
 """
-Beaver Dam Simulator - Main Application Window - Step 20
+Beaver Dam Simulator - Main Application Window - Step 21
 
 This is the shell that hosts the whole application:
 
@@ -9,7 +9,7 @@ This is the shell that hosts the whole application:
         |
         +-- Simulation Controls (ui.simulation_controls.SimulationControls)
         |
-        +-- Results Viewer      (not yet built -- placeholder button)
+        +-- Results Viewer      (ui.results_viewer.ResultsViewer)
 
 Package layout:
 
@@ -19,19 +19,17 @@ Package layout:
     |-- network_editor.py       (Step 18/19 -- graph editing only)
     |-- simulation_controls.py  (Step 20 -- SimParam + run a single sim)
     |-- batch_ui.py             (Step 20 -- CSV batch runs)
+    |-- results_viewer.py       (Step 21 -- step through a run's history)
 
 The Main Window owns the *canonical* current network as plain data
 (the same shape as NetworkEditor.to_dict()) rather than owning any
 QGraphicsScene itself. It "summons" NetworkEditor when the user wants
 to build/edit a network, and it "summons" SimulationControls when the
 user wants to run a simulation against that network -- handing it the
-current network data and picking up the resulting `history` via a
-signal, the same pattern used for the editor's `closed` signal.
-
-Works both as a package module (`python -m ui.main_window` from the
-project root, or `from ui.main_window import MainWindow` elsewhere)
-and as a loose script run directly from inside the `ui/` folder
-(`python main_window.py`) -- see the import fallback just below.
+current network data and picking up the resulting `history` (together
+with the exact network_data that run used) via a signal, the same
+pattern used for the editor's `closed` signal. "View Results" then
+summons ResultsViewer with that same pair.
 """
 
 import sys
@@ -60,17 +58,19 @@ from PySide6.QtGui import QAction, QKeySequence
 try:
     from .network_editor import NetworkEditor, is_valid_tree
     from .simulation_controls import SimulationControls
+    from .results_viewer import ResultsViewer
 except ImportError:
     from network_editor import NetworkEditor, is_valid_tree
     from simulation_controls import SimulationControls
+    from results_viewer import ResultsViewer
 
 EMPTY_NETWORK: dict = {"version": NetworkEditor.SAVE_FORMAT_VERSION, "nodes": [], "edges": []}
 
 
 class MainWindow(QMainWindow):
     """Application shell. Holds the current network as data and
-    summons NetworkEditor / (future) Simulation Controls / (future)
-    Results Viewer on demand."""
+    summons NetworkEditor / SimulationControls / ResultsViewer on
+    demand."""
 
     def __init__(self):
         super().__init__()
@@ -91,6 +91,14 @@ class MainWindow(QMainWindow):
         # Same pattern for Simulation Controls.
         self._sim_controls: SimulationControls | None = None
         self.simulation_history: list | None = None
+        # The network_data a completed run actually used -- kept
+        # separate from self.network_data because the editor may be
+        # reopened and changed after a run finishes; ResultsViewer
+        # needs the network as it was at run time, not "now".
+        self.simulation_network_data: dict | None = None
+
+        # Same pattern for Results Viewer.
+        self._results_viewer: ResultsViewer | None = None
 
         self._build_menus()
         self._build_ui()
@@ -156,7 +164,7 @@ class MainWindow(QMainWindow):
         self.run_sim_btn.clicked.connect(self.open_simulation_controls)
 
         self.view_results_btn = QPushButton("View Results")
-        self.view_results_btn.clicked.connect(self.view_results_placeholder)
+        self.view_results_btn.clicked.connect(self.view_results)
 
         for btn in (self.open_editor_btn, self.run_sim_btn, self.view_results_btn):
             button_row.addWidget(btn)
@@ -253,9 +261,16 @@ class MainWindow(QMainWindow):
         self._sim_controls.simulation_complete.connect(self._on_simulation_complete)
         self._sim_controls.show()
 
-    def _on_simulation_complete(self, history: list):
+    def _on_simulation_complete(self, history: list, network_data: dict):
         self.simulation_history = history
+        self.simulation_network_data = network_data
         self._refresh_status()
+        # If Results Viewer is already open from a previous run, refresh
+        # it in place rather than leaving it showing stale history.
+        if self._results_viewer is not None and self._results_viewer.isVisible():
+            self._results_viewer.close()
+            self._results_viewer = None
+            self.view_results()
 
 
     # File menu actions
@@ -264,6 +279,7 @@ class MainWindow(QMainWindow):
         self.network_data = dict(EMPTY_NETWORK)
         self.network_file_path = None
         self.simulation_history = None
+        self.simulation_network_data = None
         self._refresh_status()
         if self._editor is not None and self._editor.isVisible():
             self._editor.load_from_dict(self.network_data)
@@ -283,6 +299,7 @@ class MainWindow(QMainWindow):
         self.network_data = data
         self.network_file_path = path
         self.simulation_history = None
+        self.simulation_network_data = None
         self._refresh_status()
         if self._editor is not None and self._editor.isVisible():
             self._editor.load_from_dict(data)
@@ -317,23 +334,22 @@ class MainWindow(QMainWindow):
         self._refresh_status()
 
 
-    # Placeholders for future panels
+    # Summoning the Results Viewer
 
-    def view_results_placeholder(self):
-        detail = (
-            f"Last run: {len(self.simulation_history)} steps.\n\n"
-            if self.simulation_history
-            else ""
-        )
-        QMessageBox.information(
-            self,
-            "Coming Soon",
-            f"{detail}The Results Viewer hasn't been built yet.\n\n"
-            "It will restore the playback/animation (flooded edges, "
-            "pulsing nodes) that was removed from the Graph Editor in "
-            "Step 18, driven by the simulation history now stored on "
-            "MainWindow.simulation_history.",
-        )
+    def view_results(self):
+        if not self.simulation_history or not self.simulation_network_data:
+            QMessageBox.information(
+                self, "No Results", "Run a simulation first (Run Simulation)."
+            )
+            return
+
+        if self._results_viewer is not None and self._results_viewer.isVisible():
+            self._results_viewer.raise_()
+            self._results_viewer.activateWindow()
+            return
+
+        self._results_viewer = ResultsViewer(self.simulation_network_data, self.simulation_history)
+        self._results_viewer.show()
 
 
 if __name__ == "__main__":
