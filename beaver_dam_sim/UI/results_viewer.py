@@ -1,5 +1,5 @@
 """
-Results Viewer - Step 21
+Results Viewer - Step 21 (+ playback)
 
 A read-only, step-through viewer for a completed simulation run. It
 does not edit graphs (network_editor.py) and does not configure or run
@@ -28,6 +28,16 @@ network_data["edges"][i]. (Node-id remapping to a contiguous 1..N
 range only matters for build_river's call into
 RiverNetworkBuilder.create_network -- it doesn't affect this file.)
 
+Playback: a QTimer (self._play_timer) advances one step at a time at
+an interval driven by the speed slider. Any manual navigation (Previous
+/ Next / dragging the step slider) pauses playback rather than fighting
+it, so the user always has one clear "who's driving" answer. A second,
+much faster QTimer (self._pulse_timer) drives a short highlight
+animation on whichever cells changed state on the step that was just
+rendered (newly flooded, dam created, dam broken -- see PulseState),
+so state changes are noticeable even at high playback speed instead of
+just silently appearing.
+
 Works both as a package module (`python -m ui.results_viewer` from the
 project root) and as a loose script run directly from inside the
 `ui/` folder (`python results_viewer.py`) -- see the bottom of the
@@ -53,9 +63,36 @@ from PySide6.QtWidgets import (
     QGraphicsLineItem,
     QGraphicsTextItem,
     QSlider,
+    QFrame,
+    QSizePolicy,
 )
-from PySide6.QtGui import QPen, QBrush, QColor, QPolygonF
-from PySide6.QtCore import Qt, QLineF, QPointF
+from PySide6.QtGui import QPen, QBrush, QColor, QPolygonF, QKeySequence, QShortcut, QPainter
+from PySide6.QtCore import Qt, QLineF, QPointF, QTimer
+
+
+# Pulse state (shared, mutable; read by every ResultEdgeItem at paint
+# time so a single timer can drive the highlight animation for the
+# whole scene without each item needing its own timer)
+
+class PulseState:
+    """Tracks which (edge_index, cell_position) pairs changed state on
+    the step that was just rendered, and how far through the brief
+    highlight animation we are (0.0 = just changed, 1.0 = done)."""
+
+    def __init__(self):
+        self.active_keys: set[tuple[int, int]] = set()
+        self.progress: float = 1.0  # 1.0 == nothing animating
+
+    def is_active(self, edge_index: int, position: int) -> bool:
+        return self.progress < 1.0 and (edge_index, position) in self.active_keys
+
+    def start(self, keys: set[tuple[int, int]]):
+        self.active_keys = keys
+        self.progress = 0.0 if keys else 1.0
+
+    def stop(self):
+        self.active_keys = set()
+        self.progress = 1.0
 
 
 # Node
@@ -93,7 +130,8 @@ class ResultEdgeItem(QGraphicsLineItem):
     simulation step. The line/arrowhead styling mirrors EdgeItem in
     network_editor.py; the cell dots additionally encode simulation
     state (flooded / active dam / broken dam / meadow) which the pure
-    graph editor has no concept of."""
+    graph editor has no concept of, plus a brief highlight ring on
+    cells that just changed state (driven by the shared PulseState)."""
 
     CELL_RADIUS = 5
 
@@ -114,17 +152,27 @@ class ResultEdgeItem(QGraphicsLineItem):
     COLOR_MEADOW_FILL = QColor("#7CB342")
     COLOR_MEADOW_BORDER = QColor("#33691E")
 
-    def __init__(self, up_pos: QPointF, down_pos: QPointF, cells: list):
+    COLOR_PULSE = QColor("#FFEB3B")
+    PULSE_MAX_GROWTH = 9  # extra radius, in px, at the start of the pulse
+
+    def __init__(self, up_pos: QPointF, down_pos: QPointF, cells: list, edge_index: int, pulse_state: PulseState):
         """cells: the RiverEdge's Cell objects for this step, ordered
-        by position (1..N, upstream to downstream)."""
+        by position (1..N, upstream to downstream). edge_index: this
+        edge's position in network_data["edges"] / river_snapshot.edges,
+        used as the first half of a pulse key. pulse_state: shared
+        object read at paint time to decide which cells are pulsing."""
         super().__init__()
         self._cells = cells
+        self._edge_index = edge_index
+        self._pulse_state = pulse_state
         self.setZValue(-5)
         self.setLine(QLineF(up_pos, down_pos))
 
     def boundingRect(self):
         rect = super().boundingRect()
-        pad = self.CELL_RADIUS + 6
+        # Padded generously enough to cover the pulse ring's max growth
+        # too, so animated frames don't get clipped at the item's edge.
+        pad = self.CELL_RADIUS + self.PULSE_MAX_GROWTH + 6
         return rect.adjusted(-pad, -pad, pad, pad)
 
     def paint(self, painter, option, widget=None):
@@ -171,10 +219,26 @@ class ResultEdgeItem(QGraphicsLineItem):
         for cell in self._cells:
             t = cell.position / (n + 1)
             pt = line.pointAt(t)
+
+            if self._pulse_state.is_active(self._edge_index, cell.position):
+                self._paint_pulse_ring(painter, pt)
+
             fill, border = self._cell_colors(cell)
             painter.setBrush(QBrush(fill))
             painter.setPen(QPen(border, 1))
             painter.drawEllipse(pt, self.CELL_RADIUS, self.CELL_RADIUS)
+
+    def _paint_pulse_ring(self, painter, pt: QPointF):
+        """A fading, shrinking ring around a cell that just changed
+        state this step -- a lightweight stand-in for a per-cell
+        animation without needing a QPropertyAnimation per cell."""
+        progress = self._pulse_state.progress
+        radius = self.CELL_RADIUS + self.PULSE_MAX_GROWTH * (1.0 - progress)
+        color = QColor(self.COLOR_PULSE)
+        color.setAlphaF(max(0.0, 1.0 - progress))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(color, 2))
+        painter.drawEllipse(pt, radius, radius)
 
 
 # Main Viewer
@@ -184,24 +248,43 @@ class ResultsViewer(QMainWindow):
 
     Takes the network_data used for the run (for node layout) and the
     resulting history, and lets the user step forward/backward through
-    it, seeing per-step statistics and the river's flood/dam/meadow
-    state rendered on the network layout.
+    it -- manually, or via Play/Pause at an adjustable speed -- seeing
+    per-step statistics and the river's flood/dam/meadow state rendered
+    on the network layout, with a brief highlight on whatever just
+    changed.
     """
+
+    # Playback speed presets, in steps per second. Index 2 ("1x") is
+    # the default.
+    SPEED_STEPS_PER_SEC = [0.5, 1, 2, 4, 8]
+    DEFAULT_SPEED_INDEX = 2
+
+    PULSE_DURATION_MS = 500
+    PULSE_TICK_MS = 30
 
     def __init__(self, network_data: dict, history: list, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Results Viewer")
-        self.setMinimumSize(900, 640)
-        self.resize(1100, 700)
+        self.setMinimumSize(940, 660)
+        self.resize(1150, 720)
 
         self.network_data = network_data
         self.history = history
         self.current_index = 0
 
         self._outlet_ids = self._compute_outlet_ids()
+        self._pulse_state = PulseState()
+
+        self._play_timer = QTimer(self)
+        self._play_timer.timeout.connect(self._on_play_tick)
+
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.setInterval(self.PULSE_TICK_MS)
+        self._pulse_timer.timeout.connect(self._on_pulse_tick)
+        self._pulse_elapsed_ms = 0
 
         self._build_ui()
-        self._render_step()
+        self._render_step(pulse=False)
 
     def _compute_outlet_ids(self) -> set:
         """A node is an outlet if it never appears as the upstream end
@@ -224,58 +307,132 @@ class ResultsViewer(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
+        # Scene / view
         self.scene = QGraphicsScene()
+        self.scene.setBackgroundBrush(QBrush(QColor("#FAFAFA")))
+
         self.view = QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.view.setFrameShape(QFrame.Shape.StyledPanel)
+        self.view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.view, 1)
 
         side = QVBoxLayout()
         side.setAlignment(Qt.AlignmentFlag.AlignTop)
         side.setSpacing(10)
+        side_container = QWidget()
+        side_container.setLayout(side)
+        side_container.setFixedWidth(280)
+        layout.addWidget(side_container)
 
-        # Step navigation
-        nav_group = QGroupBox("Step")
-        nav_layout = QVBoxLayout()
+        side.addWidget(self._build_playback_group())
+        side.addWidget(self._build_stats_group())
+        side.addWidget(self._build_legend_group())
+        side.addStretch(1)
+
+        # Keyboard shortcuts: space to play/pause, arrows to step,
+        # Home/End to jump to the first/last step.
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self, activated=self.toggle_play)
+        QShortcut(QKeySequence(Qt.Key.Key_Left), self, activated=self.previous_step)
+        QShortcut(QKeySequence(Qt.Key.Key_Right), self, activated=self.next_step)
+        QShortcut(QKeySequence(Qt.Key.Key_Home), self, activated=self.jump_to_start)
+        QShortcut(QKeySequence(Qt.Key.Key_End), self, activated=self.jump_to_end)
+
+    def _build_playback_group(self) -> QGroupBox:
+        group = QGroupBox("Playback")
+        outer = QVBoxLayout()
+        outer.setSpacing(8)
 
         self.step_label = QLabel()
-        self.step_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self.step_label.setStyleSheet("font-size: 15px; font-weight: bold;")
         self.step_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        nav_layout.addWidget(self.step_label)
+        outer.addWidget(self.step_label)
 
-        nav_btn_row = QHBoxLayout()
-        self.prev_btn = QPushButton("\u25c0 Previous")
+        self.timeline_slider = QSlider(Qt.Orientation.Horizontal)
+        self.timeline_slider.setMinimum(0)
+        self.timeline_slider.setMaximum(max(0, len(self.history) - 1))
+        self.timeline_slider.setToolTip("Scrub to a step")
+        self.timeline_slider.valueChanged.connect(self._on_timeline_dragged)
+        outer.addWidget(self.timeline_slider)
+
+        # Transport controls: |<  <  Play/Pause  >  >|
+        transport_row = QHBoxLayout()
+        transport_row.setSpacing(4)
+
+        self.start_btn = QPushButton("\u23ee")
+        self.start_btn.setToolTip("Jump to first step (Home)")
+        self.start_btn.setFixedWidth(36)
+        self.start_btn.clicked.connect(self.jump_to_start)
+
+        self.prev_btn = QPushButton("\u25c0")
+        self.prev_btn.setToolTip("Previous step (\u2190)")
+        self.prev_btn.setFixedWidth(36)
         self.prev_btn.clicked.connect(self.previous_step)
-        self.next_btn = QPushButton("Next \u25b6")
+
+        self.play_btn = QPushButton("\u25b6  Play")
+        self.play_btn.setToolTip("Play / pause (Space)")
+        self.play_btn.setMinimumWidth(96)
+        self.play_btn.clicked.connect(self.toggle_play)
+
+        self.next_btn = QPushButton("\u25b6")
+        self.next_btn.setToolTip("Next step (\u2192)")
+        self.next_btn.setFixedWidth(36)
         self.next_btn.clicked.connect(self.next_step)
-        nav_btn_row.addWidget(self.prev_btn)
-        nav_btn_row.addWidget(self.next_btn)
-        nav_layout.addLayout(nav_btn_row)
 
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setMinimum(0)
-        self.slider.setMaximum(max(0, len(self.history) - 1))
-        self.slider.valueChanged.connect(self._on_slider_changed)
-        nav_layout.addWidget(self.slider)
+        self.end_btn = QPushButton("\u23ed")
+        self.end_btn.setToolTip("Jump to last step (End)")
+        self.end_btn.setFixedWidth(36)
+        self.end_btn.clicked.connect(self.jump_to_end)
 
-        nav_group.setLayout(nav_layout)
-        side.addWidget(nav_group)
+        for btn in (self.start_btn, self.prev_btn, self.play_btn, self.next_btn, self.end_btn):
+            transport_row.addWidget(btn)
+        outer.addLayout(transport_row)
 
-        # Statistics
-        stats_group = QGroupBox("Statistics")
-        stats_form = QFormLayout()
+        # Speed control
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(6)
+        speed_row.addWidget(QLabel("Speed"))
+
+        self.speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self.speed_slider.setMinimum(0)
+        self.speed_slider.setMaximum(len(self.SPEED_STEPS_PER_SEC) - 1)
+        self.speed_slider.setValue(self.DEFAULT_SPEED_INDEX)
+        self.speed_slider.setToolTip("Playback speed")
+        self.speed_slider.valueChanged.connect(self._on_speed_changed)
+        speed_row.addWidget(self.speed_slider, 1)
+
+        self.speed_label = QLabel()
+        self.speed_label.setMinimumWidth(38)
+        speed_row.addWidget(self.speed_label)
+
+        outer.addLayout(speed_row)
+        self._update_speed_label()
+
+        group.setLayout(outer)
+        return group
+
+    def _build_stats_group(self) -> QGroupBox:
+        group = QGroupBox("Statistics")
+        form = QFormLayout()
+        form.setVerticalSpacing(6)
+
         self.flooded_label = QLabel()
         self.dams_created_label = QLabel()
         self.dams_broken_label = QLabel()
-        stats_form.addRow("Currently flooded cells", self.flooded_label)
-        stats_form.addRow("Dams created this step", self.dams_created_label)
-        stats_form.addRow("Dams broken this step", self.dams_broken_label)
-        stats_group.setLayout(stats_form)
-        side.addWidget(stats_group)
+        for lbl in (self.flooded_label, self.dams_created_label, self.dams_broken_label):
+            lbl.setStyleSheet("font-weight: bold;")
 
-        # Legend
-        legend_group = QGroupBox("Legend")
+        form.addRow("Currently flooded cells", self.flooded_label)
+        form.addRow("Dams created this step", self.dams_created_label)
+        form.addRow("Dams broken this step", self.dams_broken_label)
+        group.setLayout(form)
+        return group
+
+    def _build_legend_group(self) -> QGroupBox:
+        group = QGroupBox("Legend")
         legend_layout = QVBoxLayout()
         legend_label = QLabel(
             "<span style='color:#1976D2'>\u25cf</span> Flooded cell<br>"
@@ -283,44 +440,140 @@ class ResultsViewer(QMainWindow):
             "<span style='color:#9E9E9E'>\u25cf</span> Broken dam<br>"
             "<span style='color:#7CB342'>\u25cf</span> Meadow<br>"
             "<span style='color:#D7CCC8'>\u25cf</span> Empty cell<br>"
-            "<span style='color:#FFB300'>\u25ce</span> Outlet"
+            "<span style='color:#FFB300'>\u25ce</span> Outlet<br>"
+            "<span style='color:#FBC02D'>\u25cb</span> Just changed"
         )
         legend_label.setTextFormat(Qt.TextFormat.RichText)
         legend_label.setWordWrap(True)
         legend_layout.addWidget(legend_label)
-        legend_group.setLayout(legend_layout)
-        side.addWidget(legend_group)
-
-        side.addStretch(1)
-        layout.addLayout(side)
+        group.setLayout(legend_layout)
+        return group
 
 
-    # Navigation
+    # Playback speed
+
+    def _current_interval_ms(self) -> int:
+        steps_per_sec = self.SPEED_STEPS_PER_SEC[self.speed_slider.value()]
+        return max(1, int(1000 / steps_per_sec))
+
+    def _update_speed_label(self):
+        steps_per_sec = self.SPEED_STEPS_PER_SEC[self.speed_slider.value()]
+        text = f"{steps_per_sec:g}x"
+        self.speed_label.setText(text)
+
+    def _on_speed_changed(self, _value: int):
+        self._update_speed_label()
+        if self._play_timer.isActive():
+            self._play_timer.setInterval(self._current_interval_ms())
+
+
+    # Play / pause
+
+    def toggle_play(self):
+        if self._play_timer.isActive():
+            self.pause_playback()
+        else:
+            self.start_playback()
+
+    def start_playback(self):
+        if not self.history:
+            return
+        if self.current_index >= len(self.history) - 1:
+            self.current_index = 0
+            self._render_step(pulse=False)
+        self._play_timer.start(self._current_interval_ms())
+        self.play_btn.setText("\u23f8  Pause")
+
+    def pause_playback(self):
+        self._play_timer.stop()
+        self.play_btn.setText("\u25b6  Play")
+
+    def _on_play_tick(self):
+        last = len(self.history) - 1
+        if self.current_index >= last:
+            self.pause_playback()
+            return
+        self.current_index += 1
+        self._sync_timeline_slider()
+        self._render_step(pulse=True)
+
+
+    # Manual navigation (always pauses playback first)
 
     def previous_step(self):
+        self.pause_playback()
         if self.current_index > 0:
             self.current_index -= 1
-            self.slider.blockSignals(True)
-            self.slider.setValue(self.current_index)
-            self.slider.blockSignals(False)
-            self._render_step()
+            self._sync_timeline_slider()
+            self._render_step(pulse=False)
 
     def next_step(self):
+        self.pause_playback()
         if self.current_index < len(self.history) - 1:
             self.current_index += 1
-            self.slider.blockSignals(True)
-            self.slider.setValue(self.current_index)
-            self.slider.blockSignals(False)
-            self._render_step()
+            self._sync_timeline_slider()
+            self._render_step(pulse=False)
 
-    def _on_slider_changed(self, value: int):
+    def jump_to_start(self):
+        self.pause_playback()
+        if self.current_index != 0:
+            self.current_index = 0
+            self._sync_timeline_slider()
+            self._render_step(pulse=False)
+
+    def jump_to_end(self):
+        self.pause_playback()
+        last = len(self.history) - 1
+        if self.current_index != last:
+            self.current_index = last
+            self._sync_timeline_slider()
+            self._render_step(pulse=False)
+
+    def _sync_timeline_slider(self):
+        self.timeline_slider.blockSignals(True)
+        self.timeline_slider.setValue(self.current_index)
+        self.timeline_slider.blockSignals(False)
+
+    def _on_timeline_dragged(self, value: int):
+        # Only fires for genuine user interaction: every programmatic
+        # slider update above blocks signals first.
+        self.pause_playback()
         self.current_index = value
-        self._render_step()
+        self._render_step(pulse=False)
+
+
+    # Pulse (highlight) animation
+
+    def _on_pulse_tick(self):
+        self._pulse_elapsed_ms += self.PULSE_TICK_MS
+        progress = self._pulse_elapsed_ms / self.PULSE_DURATION_MS
+        if progress >= 1.0:
+            self._pulse_state.stop()
+            self._pulse_timer.stop()
+        else:
+            self._pulse_state.progress = progress
+        self.scene.update()
+
+    def _changed_cell_keys(self, step) -> set[tuple[int, int]]:
+        """(edge_index, position) pairs for cells whose state changed
+        on exactly this step -- newly flooded, dam just created, or dam
+        just broken -- so the pulse only highlights what's new."""
+        keys: set[tuple[int, int]] = set()
+        for edge_index, edge in enumerate(step.river_snapshot.edges):
+            for cell in edge.cells.values():
+                changed = (
+                    (cell.flooded and cell.flooded_step == step.step)
+                    or (cell.dam is not None and cell.dam.created_step == step.step)
+                    or (cell.dam is not None and cell.dam.broken and cell.dam.broken_step == step.step)
+                )
+                if changed:
+                    keys.add((edge_index, cell.position))
+        return keys
 
 
     # Rendering
 
-    def _render_step(self):
+    def _render_step(self, pulse: bool):
         self.scene.clear()
 
         if not self.history:
@@ -340,12 +593,14 @@ class ResultsViewer(QMainWindow):
 
         edges_data = self.network_data.get("edges", [])
         river_edges = step.river_snapshot.edges
-        for edge_data, river_edge in zip(edges_data, river_edges):
+        for edge_index, (edge_data, river_edge) in enumerate(zip(edges_data, river_edges)):
             up_id, down_id = edge_pair(edge_data)
             up_x, up_y = node_positions[up_id]
             down_x, down_y = node_positions[down_id]
             cells = [river_edge.cells[pos] for pos in sorted(river_edge.cells.keys())]
-            self.scene.addItem(ResultEdgeItem(QPointF(up_x, up_y), QPointF(down_x, down_y), cells))
+            self.scene.addItem(
+                ResultEdgeItem(QPointF(up_x, up_y), QPointF(down_x, down_y), cells, edge_index, self._pulse_state)
+            )
 
         bounds = self.scene.itemsBoundingRect().adjusted(-40, -40, 40, 40)
         self.scene.setSceneRect(bounds)
@@ -357,13 +612,30 @@ class ResultsViewer(QMainWindow):
         self.dams_created_label.setText(str(len(step.dams_created)))
         self.dams_broken_label.setText(str(len(step.dams_broken)))
 
+        self.start_btn.setEnabled(self.current_index > 0)
         self.prev_btn.setEnabled(self.current_index > 0)
         self.next_btn.setEnabled(self.current_index < last_step)
+        self.end_btn.setEnabled(self.current_index < last_step)
+        self.play_btn.setEnabled(last_step > 0)
+
+        if pulse:
+            self._pulse_elapsed_ms = 0
+            self._pulse_state.start(self._changed_cell_keys(step))
+            if self._pulse_state.active_keys:
+                self._pulse_timer.start()
+        else:
+            self._pulse_timer.stop()
+            self._pulse_state.stop()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.scene.itemsBoundingRect().isValid():
             self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    def closeEvent(self, event):
+        self._play_timer.stop()
+        self._pulse_timer.stop()
+        super().closeEvent(event)
 
 
 # Run (self-contained demo: builds a small network + runs a sim so this
