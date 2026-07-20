@@ -36,6 +36,19 @@ Step 19 adds the "summonable" API a host window (main_window.py) needs:
   * is_valid_tree(data) is a standalone helper so a host window can
     validate/describe a saved network without instantiating a
     QGraphicsScene at all.
+
+Step 24.1 adds Undo/Redo (Edit menu, Ctrl+Z / Ctrl+Shift+Z, plus
+buttons). It's snapshot-based rather than command-object-based: each
+undoable action pushes a labeled to_dict() snapshot of the graph onto
+self._undo_stack *before* the mutation happens; undo/redo just
+load_from_dict() the appropriate snapshot. self._suspend_history guards
+load_from_dict() against pushing/clearing history while undo()/redo()
+themselves are restoring a snapshot (as opposed to an external full
+reload -- opening a file, "New Network", etc. -- which legitimately
+should clear undo history). Rapid-fire interactions (dragging a node,
+nudging the edge-length spinbox) are coalesced into a single undo step
+rather than one per intermediate event -- see NodeItem's
+mousePress/ReleaseEvent and _on_edge_length_changed.
 """
 
 import sys
@@ -79,6 +92,7 @@ from PySide6.QtGui import (
     QPolygonF,
     QKeySequence,
     QShortcut,
+    QAction,
 )
 from PySide6.QtCore import Qt, QLineF, QPointF, Signal
 import math
@@ -137,7 +151,18 @@ class NodeItem(QGraphicsEllipseItem):
     def mousePressEvent(self, event):
         editor = cast("NetworkEditor", cast(QWidget, self.scene().views()[0].window()))
         editor.node_clicked(self)
+        # Capture a pre-drag snapshot in case this press turns into a
+        # drag; it's only committed to the undo stack on release, and
+        # only if the node actually moved -- a plain click (e.g. to
+        # select, or as the first pick in add-edge mode) shouldn't
+        # create an undo entry.
+        editor._begin_potential_drag()
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        editor = cast("NetworkEditor", cast(QWidget, self.scene().views()[0].window()))
+        editor._commit_drag_if_moved()
 
     def set_highlight(self, mode: str):
         """mode: 'default', 'pending', or 'root'."""
@@ -331,9 +356,19 @@ class NetworkEditor(QMainWindow):
         self.selected_node: NodeItem | None = None
         self._add_edge_mode = False
         self._editing_edge: EdgeItem | None = None
+        self._length_edit_session_edge: EdgeItem | None = None
+
+        # Undo/redo (see module docstring, "Step 24.1").
+        self._undo_stack: list[dict] = []
+        self._redo_stack: list[dict] = []
+        self._suspend_history = False
+        self._pending_drag_snapshot: dict | None = None
+        self.MAX_UNDO = 100
 
         self.resize(1200, 700)
+        self._build_menus()
         self._build_ui()
+        self._update_undo_redo_actions()
 
         if initial_data:
             self.load_from_dict(initial_data)
@@ -341,6 +376,23 @@ class NetworkEditor(QMainWindow):
     def closeEvent(self, event):
         self.closed.emit(self.to_dict())
         super().closeEvent(event)
+
+
+    # Menus
+
+    def _build_menus(self):
+        edit_menu = self.menuBar().addMenu("&Edit")
+
+        self.undo_action = QAction("&Undo", self)
+        self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        self.undo_action.triggered.connect(self.undo)
+
+        self.redo_action = QAction("&Redo", self)
+        self.redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        self.redo_action.triggered.connect(self.redo)
+
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addAction(self.redo_action)
 
 
     # UI
@@ -422,9 +474,20 @@ class NetworkEditor(QMainWindow):
         load_btn = QPushButton("Load")
         load_btn.clicked.connect(self.load_network)
 
+        self.undo_btn = QPushButton("\u21b6 Undo")
+        self.undo_btn.setToolTip("Undo (Ctrl+Z)")
+        self.undo_btn.clicked.connect(self.undo)
+
+        self.redo_btn = QPushButton("\u21b7 Redo")
+        self.redo_btn.setToolTip("Redo (Ctrl+Shift+Z)")
+        self.redo_btn.clicked.connect(self.redo)
+
         action_grid = QGridLayout()
         action_grid.setSpacing(4)
-        action_buttons = [gen_btn, add_node_btn, self.add_edge_btn, delete_btn, layout_btn, save_btn, load_btn]
+        action_buttons = [
+            gen_btn, add_node_btn, self.add_edge_btn, delete_btn,
+            layout_btn, save_btn, load_btn, self.undo_btn, self.redo_btn,
+        ]
         cols = 2
         for i, btn in enumerate(action_buttons):
             action_grid.addWidget(btn, i // cols, i % cols)
@@ -582,6 +645,98 @@ class NetworkEditor(QMainWindow):
             node.set_highlight("root" if node.node_id in root_ids else "default")
 
 
+    # Undo / Redo (see module docstring, "Step 24.1")
+
+    def _push_undo_snapshot(self, label: str):
+        """Record the graph as it is RIGHT NOW, tagged with a label
+        describing the action about to happen, so it can be restored
+        if that action is later undone. Must be called before the
+        mutation, not after. Any new action invalidates the redo
+        history (there's no single sensible "redo" once you've branched
+        off in a different direction)."""
+        if self._suspend_history:
+            return
+        self._undo_stack.append({"label": label, "data": self.to_dict()})
+        if len(self._undo_stack) > self.MAX_UNDO:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+        self._update_undo_redo_actions()
+
+    def _update_undo_redo_actions(self):
+        if self._undo_stack:
+            self.undo_action.setEnabled(True)
+            self.undo_action.setText(f"&Undo {self._undo_stack[-1]['label']}")
+        else:
+            self.undo_action.setEnabled(False)
+            self.undo_action.setText("&Undo")
+
+        if self._redo_stack:
+            self.redo_action.setEnabled(True)
+            self.redo_action.setText(f"&Redo {self._redo_stack[-1]['label']}")
+        else:
+            self.redo_action.setEnabled(False)
+            self.redo_action.setText("&Redo")
+
+        self.undo_btn.setEnabled(self.undo_action.isEnabled())
+        self.undo_btn.setToolTip(self.undo_action.text().replace("&", "") + " (Ctrl+Z)")
+        self.redo_btn.setEnabled(self.redo_action.isEnabled())
+        self.redo_btn.setToolTip(self.redo_action.text().replace("&", "") + " (Ctrl+Shift+Z)")
+
+    def undo(self):
+        if not self._undo_stack:
+            return
+        entry = self._undo_stack.pop()
+        # What we're restoring FROM (the current, about-to-be-undone
+        # state) becomes the redo entry for this same action.
+        self._redo_stack.append({"label": entry["label"], "data": self.to_dict()})
+        self._suspend_history = True
+        self.load_from_dict(entry["data"])
+        self._suspend_history = False
+        self._update_undo_redo_actions()
+
+    def redo(self):
+        if not self._redo_stack:
+            return
+        entry = self._redo_stack.pop()
+        self._undo_stack.append({"label": entry["label"], "data": self.to_dict()})
+        self._suspend_history = True
+        self.load_from_dict(entry["data"])
+        self._suspend_history = False
+        self._update_undo_redo_actions()
+
+    def _begin_potential_drag(self):
+        """Called on every node mouse-press. Captures a snapshot in
+        case this turns into a drag, without committing it to the undo
+        stack yet -- a click that doesn't move anything (e.g. plain
+        selection, or the first pick in add-edge mode) shouldn't create
+        an undo entry. See _commit_drag_if_moved()."""
+        if self._suspend_history:
+            return
+        self._pending_drag_snapshot = self.to_dict()
+
+    def _commit_drag_if_moved(self):
+        """Called on every node mouse-release. Only pushes an undo
+        entry if the node's position actually changed since the
+        matching _begin_potential_drag() -- comparing the two snapshots
+        directly (rather than tracking per-node start/end coordinates)
+        so it's correct even if edge creation or other state changed
+        during the same press-release cycle."""
+        if self._pending_drag_snapshot is None:
+            return
+        before = self._pending_drag_snapshot
+        self._pending_drag_snapshot = None
+        if before == self.to_dict():
+            return
+        # Push the captured "before" state directly -- not via
+        # _push_undo_snapshot(), which would snapshot the CURRENT
+        # (post-move) state instead of the pre-drag one.
+        self._undo_stack.append({"label": "Move Node", "data": before})
+        if len(self._undo_stack) > self.MAX_UNDO:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+        self._update_undo_redo_actions()
+
+
     # Node / edge creation & deletion
 
     def _add_node_at(self, x: float, y: float) -> NodeItem:
@@ -592,6 +747,7 @@ class NetworkEditor(QMainWindow):
         return node
 
     def add_node(self):
+        self._push_undo_snapshot("Add Node")
         x = 100 + (self.node_counter * 37) % 800
         y = 100 + (self.node_counter * 53) % 600
         self._add_node_at(x, y)
@@ -634,6 +790,7 @@ class NetworkEditor(QMainWindow):
         if not ok:
             QMessageBox.warning(self, "Invalid Connection", reason)
         else:
+            self._push_undo_snapshot("Add Edge")
             self._add_edge_between(self.selected_node, node)
 
         self.selected_node.set_highlight("default")
@@ -662,6 +819,7 @@ class NetworkEditor(QMainWindow):
         items = self.scene.selectedItems()
         if not items:
             return
+        self._push_undo_snapshot(self._describe_selection_for_delete(items))
         for item in items:
             if isinstance(item, NodeItem):
                 self._delete_node(item)
@@ -670,12 +828,23 @@ class NetworkEditor(QMainWindow):
         self._refresh_node_highlights()
         self._update_tree_status()
 
+    @staticmethod
+    def _describe_selection_for_delete(items: list) -> str:
+        n_nodes = sum(1 for i in items if isinstance(i, NodeItem))
+        n_edges = sum(1 for i in items if isinstance(i, EdgeItem))
+        if n_nodes and not n_edges:
+            return "Delete Node" if n_nodes == 1 else "Delete Nodes"
+        if n_edges and not n_nodes:
+            return "Delete Edge" if n_edges == 1 else "Delete Edges"
+        return "Delete Selection"
+
     def _clear_scene(self):
         self.scene.clear()
         self.nodes.clear()
         self.edges.clear()
         self.selected_node = None
         self.node_counter = 0
+        self._pending_drag_snapshot = None
         self.status_label.setText("Empty network")
 
 
@@ -683,6 +852,10 @@ class NetworkEditor(QMainWindow):
 
     def _on_selection_changed(self):
         edges_selected = [i for i in self.scene.selectedItems() if isinstance(i, EdgeItem)]
+        # A new selection always starts a fresh undo-coalescing session
+        # (see _on_edge_length_changed): the next length edit, whichever
+        # edge it's on, should push its own undo snapshot.
+        self._length_edit_session_edge = None
         if len(edges_selected) == 1:
             edge = edges_selected[0]
             self._editing_edge = edge
@@ -699,13 +872,23 @@ class NetworkEditor(QMainWindow):
             self.edge_length_spin.setEnabled(False)
 
     def _on_edge_length_changed(self, value: int):
-        if self._editing_edge is not None:
-            self._editing_edge.set_length(value)
+        if self._editing_edge is None:
+            return
+        # Coalesce every length change made to the same edge within one
+        # selection session into a single undo step, rather than one
+        # per spinbox tick -- otherwise holding the spinner arrow down
+        # would flood the undo stack.
+        if self._length_edit_session_edge is not self._editing_edge:
+            self._push_undo_snapshot("Edit Edge Length")
+            self._length_edit_session_edge = self._editing_edge
+        self._editing_edge.set_length(value)
 
 
     # Network generation (always produces a single valid tree)
 
     def generate_network(self):
+        self._push_undo_snapshot("Generate Network")
+
         n = self.gen_node_count.value()
         topology = self.gen_topology.currentText()
         length = self.default_edge_length.value()
@@ -723,7 +906,9 @@ class NetworkEditor(QMainWindow):
 
         self._refresh_node_highlights()
         self._update_tree_status()
-        self.auto_layout()
+        # Internal helper (not the public, undo-pushing auto_layout())
+        # -- this whole generate action is already one undo step.
+        self._apply_auto_layout()
 
     def _generate_linear(self, n: int, length: int):
         """A single chain: node_n -> node_(n-1) -> ... -> node_1 (outlet)."""
@@ -788,6 +973,16 @@ class NetworkEditor(QMainWindow):
         return depth
 
     def auto_layout(self):
+        """Button-facing entry point: pushes one undo step, then
+        repositions. generate_network() reuses the positioning logic
+        via _apply_auto_layout() directly, since it already pushes its
+        own undo step and repositioning is just part of that action."""
+        if not self.nodes:
+            return
+        self._push_undo_snapshot("Auto-Layout")
+        self._apply_auto_layout()
+
+    def _apply_auto_layout(self):
         """Position nodes so upstream (source) nodes render higher and
         each tree's outlet renders at the bottom, with zigzag/jitter so
         chains don't render as perfectly straight lines."""
@@ -874,6 +1069,17 @@ class NetworkEditor(QMainWindow):
 
         self._refresh_node_highlights()
         self._update_tree_status()
+
+        # A full external reload (opening a file, "New Network", a host
+        # window pushing a different network in) starts a fresh undo
+        # history -- undoing past it into a *different* network's edits
+        # wouldn't mean anything. self._suspend_history is only True
+        # while undo()/redo() themselves are calling this method to
+        # restore a snapshot, in which case history must NOT be cleared.
+        if not self._suspend_history:
+            self._undo_stack.clear()
+            self._redo_stack.clear()
+            self._update_undo_redo_actions()
 
     def save_network(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save", "", "JSON (*.json)")
