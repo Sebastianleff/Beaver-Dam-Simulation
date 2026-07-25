@@ -1,6 +1,7 @@
 """All Dataclass models for the program"""
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from itertools import count
 from typing import ClassVar
@@ -11,6 +12,11 @@ class RiverNetwork:
 
     nodes: list[RiverNode]
     edges: list[RiverEdge]
+
+    @property
+    def terminal_node(self) -> RiverNode:
+        """The terminal node of the graph."""
+        return next((node for node in self.nodes if node.is_terminal))
 
     def __init__(self):
         self.nodes = []
@@ -32,9 +38,47 @@ class RiverNetwork:
 
         self.edges.append(new_edge)
 
+    def shreve_order(self) -> None:
+        """Assign Shreve order numbering to each edge"""
 
+        ordered_nodes: list[RiverNode] = []
+        queue = deque([self.terminal_node])
 
+        #add starting order at 1 for outer edges
+        for edge in (e for e in self.edges if e.is_outer_edge):
+            edge.stream_order = 1
 
+        #collect list of each node in terminal-up order from root node (sort)
+        while queue:
+            node = queue.popleft()
+
+            #this should happen, but if it does, don't.
+            if node.up_stream_edge is None:
+                continue
+
+            ordered_nodes.append(node)
+
+            #only add nodes that don't have terminal outer edges that already have order value 1
+            for edge in node.up_stream_edge:
+                if not edge.is_outer_edge:
+                    queue.append(edge.up_stream_node)
+
+        #iterate list collecting both upstream edges and adding order to downstream edge
+        while ordered_nodes:
+            node = ordered_nodes.pop()
+
+            #should only happen for terminal node
+            if node.down_stream_edge is None:
+                continue
+
+            value = 0
+
+            for edge in node.up_stream_edge:
+                value += edge.stream_order
+
+            node.down_stream_edge.stream_order = value
+
+        #profit after 30 **** hours
 
 @dataclass
 class RiverNode:
@@ -51,6 +95,10 @@ class RiverNode:
     id: int = field(default_factory=lambda: next(RiverNode._node_counter))
     """The id of the Node"""
 
+    @property
+    def is_terminal(self) -> bool:
+        """Return True if the node is terminal"""
+        return self.down_stream_edge is None
 
 @dataclass
 class RiverEdge:
@@ -72,6 +120,14 @@ class RiverEdge:
 
     length: int = 100
     """The length of the edge, must be whole number"""
+
+    stream_order: int = None
+    """The order of the edge based on Shreve order"""
+
+    @property
+    def is_outer_edge(self) -> bool:
+        """The edge is the last edge on its line"""
+        return self.up_stream_node.up_stream_edge is None
 
     def create_cells(self) -> None:
         """Create all cells needed for the edge."""
