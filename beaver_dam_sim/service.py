@@ -75,16 +75,16 @@ class RiverNetworkFactory:
     def create_default_network() -> RiverNetwork:
         network = RiverNetwork()
 
-        for _ in range(8):
+        for _ in range (8):
             network.add_node()
 
-        network.add_edge(5, 1)
-        network.add_edge(5,2)
-        network.add_edge(6, 3)
-        network.add_edge(6,4)
-        network.add_edge(7, 5)
-        network.add_edge(7,6)
-        network.add_edge(8,7)
+        network.add_edge(network.node_from_id(5), network.node_from_id(1))
+        network.add_edge(network.node_from_id(5), network.node_from_id(2))
+        network.add_edge(network.node_from_id(6), network.node_from_id(3))
+        network.add_edge(network.node_from_id(6), network.node_from_id(4))
+        network.add_edge(network.node_from_id(7), network.node_from_id(5))
+        network.add_edge(network.node_from_id(7), network.node_from_id(6))
+        network.add_edge(network.node_from_id(8), network.node_from_id(7))
 
         return network
 
@@ -110,7 +110,7 @@ class RiverNetworkBuilder:
             if up < 1 or up > node_count:
                 raise ValueError(f"Invalid upstream node: {up}")
 
-            network.add_edge(down, up)
+            network.add_edge(network.node_from_id(down), network.node_from_id(up))
 
         return network
 

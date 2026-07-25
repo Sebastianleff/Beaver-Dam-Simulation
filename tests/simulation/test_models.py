@@ -1,15 +1,24 @@
 from collections import deque
 from unittest import TestCase
-
 from beaver_dam_sim.simulation.models import RiverEdge, RiverNode, RiverNetwork
+from collections.abc import Callable
+from itertools import count
 
+def make_counter(start: int = 1) -> Callable[[], int]:
+    values = count(start)
+    return lambda: next(values)
 
 class TestRiverEdge(TestCase):
     def test_post_init_creates_cells_with_expected_shape(self):
-        down = RiverNode()
-        up = RiverNode()
 
-        edge = RiverEdge(down_stream_node=down, up_stream_node=up, length=30)
+        down = RiverNode(1)
+        up = RiverNode(2)
+
+        cell_counter = make_counter()
+        dam_counter = make_counter()
+
+        edge = RiverEdge(down_stream_node=down, up_stream_node=up, length=30, id = 1, next_cell_id=cell_counter,
+    next_dam_id=dam_counter )
 
         self.assertEqual(len(edge.cells), 3)
         self.assertEqual(list(edge.cells.keys()), [1, 2, 3])
