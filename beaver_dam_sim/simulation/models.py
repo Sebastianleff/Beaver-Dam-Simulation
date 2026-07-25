@@ -23,9 +23,14 @@ class RiverNetwork:
     def add_edge(self, down_stream_node, up_stream_node) -> None:
         """Add an edge to the graph and connect it nodes."""
         new_edge = RiverEdge(down_stream_node, up_stream_node)
+
+        if down_stream_node.up_stream_edge is None:
+            down_stream_node.up_stream_edge = []
+
+        down_stream_node.up_stream_edge.append(new_edge)
+        up_stream_node.down_stream_edge = new_edge
+
         self.edges.append(new_edge)
-        down_stream_node.edges.append(new_edge)
-        up_stream_node.edges.append(new_edge)
 
 
 
