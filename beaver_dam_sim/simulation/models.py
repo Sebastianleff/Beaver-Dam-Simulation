@@ -71,6 +71,8 @@ class RiverNetwork:
         if down_stream_node.up_stream_edge is None:
             down_stream_node.up_stream_edge = []
 
+        assert down_stream_node.up_stream_edge is not None
+
         down_stream_node.up_stream_edge.append(new_edge)
         up_stream_node.down_stream_edge = new_edge
 
@@ -106,7 +108,7 @@ class RiverNetwork:
             node = ordered_nodes.pop()
 
             #should only happen for terminal node
-            if node.down_stream_edge is None:
+            if node.down_stream_edge is None or node.up_stream_edge is None:
                 continue
 
             value = 0
@@ -163,7 +165,7 @@ class RiverEdge:
     length: int = 100
     """The length of the edge, must be whole number"""
 
-    stream_order: int = None
+    stream_order: int | None = None
     """The order of the edge based on Shreve order"""
 
     @property
