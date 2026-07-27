@@ -1,5 +1,5 @@
 """
-Beaver Dam Simulator - Main Application Window - Step 21
+Beaver Dam Simulator - Main Application Window - Step 24.2
 
 This is the shell that hosts the whole application:
 
@@ -16,7 +16,7 @@ Package layout:
     ui/
     |-- __init__.py
     |-- main_window.py          (this file)
-    |-- network_editor.py       (Step 18/19 -- graph editing only)
+    |-- network_editor.py       (Step 18/19, 24.1 -- graph editing + undo/redo)
     |-- simulation_controls.py  (Step 20 -- SimParam + run a single sim)
     |-- batch_ui.py             (Step 20 -- CSV batch runs)
     |-- results_viewer.py       (Step 21 -- step through a run's history)
@@ -30,9 +30,19 @@ current network data and picking up the resulting `history` (together
 with the exact network_data that run used) via a signal, the same
 pattern used for the editor's `closed` signal. "View Results" then
 summons ResultsViewer with that same pair.
+
+Step 24.2 adds File > Open Recent: every successful Open/Save/Save As
+records the path via QSettings (Qt's standard cross-platform settings
+store -- an .ini file on Linux, the registry on Windows, a plist on
+macOS), so the list survives app restarts without us needing to invent
+our own storage format. Recent-file paths that no longer exist on disk
+are pruned lazily -- at startup, and whenever clicking one fails --
+rather than proactively watched, since watching a list of files the
+user may never revisit isn't worth the complexity here.
 """
 
 import sys
+import os
 import json
 
 from PySide6.QtWidgets import (
@@ -48,6 +58,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QSettings
 
 # Relative import when this file is used as part of the `ui` package
 # (python -m ui.main_window, or `from ui.main_window import MainWindow`);
@@ -100,6 +111,13 @@ class MainWindow(QMainWindow):
         # Same pattern for Results Viewer.
         self._results_viewer: ResultsViewer | None = None
 
+        # Recent Files (see module docstring, "Step 24.2"). Loaded
+        # before _build_menus() so the "Open Recent" submenu can be
+        # populated on first build instead of starting empty.
+        self.settings = QSettings("BeaverDamSim", "BeaverDamSimulator")
+        self.MAX_RECENT_FILES = 10
+        self.recent_files: list[str] = self._load_recent_files()
+
         self._build_menus()
         self._build_ui()
         self._refresh_status()
@@ -130,6 +148,8 @@ class MainWindow(QMainWindow):
 
         file_menu.addAction(new_action)
         file_menu.addAction(open_action)
+        self.recent_menu = file_menu.addMenu("Open &Recent")
+        self._rebuild_recent_menu()
         file_menu.addSeparator()
         file_menu.addAction(save_action)
         file_menu.addAction(save_as_action)
@@ -171,6 +191,66 @@ class MainWindow(QMainWindow):
         layout.addLayout(button_row)
 
         layout.addStretch(1)
+
+
+    # Recent Files (see module docstring, "Step 24.2")
+
+    def _load_recent_files(self) -> list[str]:
+        stored = self.settings.value("recentFiles", [])
+        if not isinstance(stored, list):
+            # QSettings can hand back a bare string instead of a
+            # 1-item list depending on platform/backend -- normalize.
+            stored = [stored] if stored else []
+        # Prune anything that's vanished since we last ran, so the
+        # menu doesn't accumulate dead entries from stale sessions.
+        return [p for p in stored if isinstance(p, str) and os.path.isfile(p)]
+
+    def _save_recent_files(self):
+        self.settings.setValue("recentFiles", self.recent_files)
+
+    def _add_recent_file(self, path: str):
+        path = os.path.abspath(path)
+        if path in self.recent_files:
+            self.recent_files.remove(path)
+        self.recent_files.insert(0, path)
+        del self.recent_files[self.MAX_RECENT_FILES:]
+        self._save_recent_files()
+        self._rebuild_recent_menu()
+
+    def _remove_recent_file(self, path: str):
+        if path in self.recent_files:
+            self.recent_files.remove(path)
+            self._save_recent_files()
+            self._rebuild_recent_menu()
+
+    def _clear_recent_files(self):
+        self.recent_files = []
+        self._save_recent_files()
+        self._rebuild_recent_menu()
+
+    def _rebuild_recent_menu(self):
+        self.recent_menu.clear()
+
+        if not self.recent_files:
+            empty_action = QAction("(No Recent Files)", self)
+            empty_action.setEnabled(False)
+            self.recent_menu.addAction(empty_action)
+            return
+
+        for i, path in enumerate(self.recent_files, start=1):
+            # Mnemonic digit (Alt+1..9, then 0 for the 10th) plus the
+            # filename; the full path is a tooltip since it can be long.
+            mnemonic = str(i % 10)
+            action = QAction(f"&{mnemonic}  {os.path.basename(path)}", self)
+            action.setToolTip(path)
+            action.setStatusTip(path)
+            action.triggered.connect(lambda checked=False, p=path: self.open_recent_file(p))
+            self.recent_menu.addAction(action)
+
+        self.recent_menu.addSeparator()
+        clear_action = QAction("Clear Recent Files", self)
+        clear_action.triggered.connect(self._clear_recent_files)
+        self.recent_menu.addAction(clear_action)
 
 
     # Status
@@ -289,11 +369,33 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open Network", "", "JSON (*.json)")
         if not path:
             return
+        self._load_network_from_path(path)
+
+    def open_recent_file(self, path: str):
+        if not os.path.isfile(path):
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"This file no longer exists and will be removed from Recent Files:\n{path}",
+            )
+            self._remove_recent_file(path)
+            return
+        self._load_network_from_path(path)
+
+    def _load_network_from_path(self, path: str):
+        """Shared by open_network_file() (file dialog) and
+        open_recent_file() (Open Recent submenu) -- both end up
+        loading the same way and recording the same recent-file entry
+        on success."""
         try:
             with open(path, "r") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as exc:
             QMessageBox.critical(self, "Error", f"Could not open network:\n{exc}")
+            # If this came from Recent Files and is now unreadable
+            # (deleted/corrupted/permissions changed), drop the stale
+            # entry rather than leaving a dead link in the menu.
+            self._remove_recent_file(path)
             return
 
         self.network_data = data
@@ -304,6 +406,7 @@ class MainWindow(QMainWindow):
         if self._editor is not None and self._editor.isVisible():
             self._editor.load_from_dict(data)
         self._sync_open_sim_controls()
+        self._add_recent_file(path)
 
     def save_network_file(self):
         if self.network_file_path:
@@ -332,6 +435,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Could not save network:\n{exc}")
             return
         self._refresh_status()
+        self._add_recent_file(path)
 
 
     # Summoning the Results Viewer
@@ -350,6 +454,10 @@ class MainWindow(QMainWindow):
 
         self._results_viewer = ResultsViewer(self.simulation_network_data, self.simulation_history)
         self._results_viewer.show()
+
+    def closeEvent(self, event):
+        self.settings.sync()
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":
