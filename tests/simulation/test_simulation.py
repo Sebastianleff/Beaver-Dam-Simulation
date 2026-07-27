@@ -21,7 +21,7 @@ def make_river():
     river = RiverNetwork()
     river.add_node()
     river.add_node()
-    river.add_edge(0,1)
+    river.add_edge(river.nodes[0],river.nodes[1])
     return river
 
 def arrange_river_full():

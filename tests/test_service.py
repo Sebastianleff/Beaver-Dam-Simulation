@@ -83,7 +83,7 @@ class TestRiverNetworkFactory(unittest.TestCase):
         self.assertEqual(len(network.nodes), 8)
         self.assertEqual(len(network.edges), 7)
 
-        actual_pairs = {(edge.down_stream_node, edge.up_stream_node) for edge in network.edges}
+        actual_pairs = {(edge.down_stream_node.id, edge.up_stream_node.id) for edge in network.edges}
         expected_pairs = {
             (5, 1),
             (5, 2),

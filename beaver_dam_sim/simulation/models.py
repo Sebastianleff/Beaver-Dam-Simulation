@@ -1,9 +1,11 @@
 """All Dataclass models for the program"""
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from itertools import count
 from typing import ClassVar
+from collections.abc import Callable
 
 
 class RiverNetwork:
@@ -12,24 +14,118 @@ class RiverNetwork:
     nodes: list[RiverNode]
     edges: list[RiverEdge]
 
+    @property
+    def terminal_node(self) -> RiverNode:
+        """The terminal node of the graph."""
+        return next((node for node in self.nodes if node.is_terminal))
+
+    def node_from_id(self, node_id: int) -> RiverNode:
+        """Return the node corresponding to the given id."""
+        for node in self.nodes:
+            if node.id == node_id:
+                return node
+        raise Exception("Node not found")
+
     def __init__(self):
         self.nodes = []
         self.edges = []
+        self._node_id = 1
+        self._edge_id = 1
+        self._cell_id = 1
+        self._dam_id = 1
+
+    def _next_node_id(self):
+        i = self._node_id
+        self._node_id += 1
+        return i
+
+    def _next_edge_id(self):
+        i = self._edge_id
+        self._edge_id += 1
+        return i
+
+    def _next_cell_id(self):
+        i = self._cell_id
+        self._cell_id += 1
+        return i
+
+    def _next_dam_id(self):
+        i = self._dam_id
+        self._dam_id += 1
+        return i
 
     def add_node(self) -> None:
         """Add a new node to the graph."""
-        self.nodes.append(RiverNode())
+        self.nodes.append(RiverNode(id=self._next_node_id()))
 
-    def add_edge(self, down_stream_node, up_stream_node) -> None:
+    def add_edge(self, down_stream_node:RiverNode, up_stream_node:RiverNode) -> None:
         """Add an edge to the graph and connect it nodes."""
-        self.edges.append(RiverEdge(down_stream_node, up_stream_node))
+        new_edge = RiverEdge(
+            down_stream_node,
+            up_stream_node,
+            id = self._next_edge_id(),
+            next_cell_id = self._next_cell_id,
+            next_dam_id = self._next_dam_id,
+        )
 
+        if down_stream_node.up_stream_edge is None:
+            down_stream_node.up_stream_edge = []
+
+        assert down_stream_node.up_stream_edge is not None
+
+        down_stream_node.up_stream_edge.append(new_edge)
+        up_stream_node.down_stream_edge = new_edge
+
+        self.edges.append(new_edge)
+
+    def shreve_order(self) -> None:
+        """Assign Shreve order numbering to each edge"""
+
+        ordered_nodes: list[RiverNode] = []
+        queue = deque([self.terminal_node])
+
+        #add starting order at 1 for outer edges
+        for edge in (e for e in self.edges if e.is_outer_edge):
+            edge.stream_order = 1
+
+        #collect list of each node in terminal-up order from root node (sort)
+        while queue:
+            node = queue.popleft()
+
+            #this should happen, but if it does, don't.
+            if node.up_stream_edge is None:
+                continue
+
+            ordered_nodes.append(node)
+
+            #only add nodes that don't have terminal outer edges that already have order value 1
+            for edge in node.up_stream_edge:
+                if not edge.is_outer_edge:
+                    queue.append(edge.up_stream_node)
+
+        #iterate list collecting both upstream edges and adding order to downstream edge
+        while ordered_nodes:
+            node = ordered_nodes.pop()
+
+            #should only happen for terminal node
+            if node.down_stream_edge is None or node.up_stream_edge is None:
+                continue
+
+            value = 0
+
+            for edge in node.up_stream_edge:
+                value += edge.stream_order
+
+            node.down_stream_edge.stream_order = value
+
+        #profit after 30 **** hours
 
 @dataclass
 class RiverNode:
     """A node representing an intersection of two segments of river"""
 
-    _node_counter: ClassVar[count] = count(1)
+    id: int
+    """The id of the Node"""
 
     down_stream_edge: RiverEdge | None = None
     """The edge that is downstream of this node"""
@@ -37,9 +133,10 @@ class RiverNode:
     up_stream_edge: list[RiverEdge] | None = None
     """The edges that are upstream of this node"""
 
-    id: int = field(default_factory=lambda: next(RiverNode._node_counter))
-    """The id of the Node"""
-
+    @property
+    def is_terminal(self) -> bool:
+        """Return True if the node is terminal"""
+        return self.down_stream_edge is None
 
 @dataclass
 class RiverEdge:
@@ -53,14 +150,28 @@ class RiverEdge:
     up_stream_node: RiverNode
     """The node upstream of the edge"""
 
+    id: int
+    """The id of the Edge"""
+
+    next_cell_id: Callable = field(repr=False)
+    """The function to call for the next cell ID in the network"""
+
+    next_dam_id: Callable = field(repr=False)
+    """The function to call for the next dam ID in the network"""
+
     cells: dict[int, Cell] = field(default_factory=dict)
     """The cells that are on the edge held with their position"""
 
-    id: int = field(default_factory=lambda: next(RiverEdge._edge_counter))
-    """The id of the Edge"""
-
     length: int = 100
     """The length of the edge, must be whole number"""
+
+    stream_order: int | None = None
+    """The order of the edge based on Shreve order"""
+
+    @property
+    def is_outer_edge(self) -> bool:
+        """The edge is the last edge on its line"""
+        return self.up_stream_node.up_stream_edge is None
 
     def create_cells(self) -> None:
         """Create all cells needed for the edge."""
@@ -90,7 +201,7 @@ class Cell:
     position: int
     """The position of the cell as its position relative other cells to the upstream of a edge starting at 1"""
 
-    id: int = field(default_factory=lambda: next(Cell._cell_counter))
+    id: int | None = None
     """The id of the cell"""
 
     dam: Dam | None = None
@@ -98,6 +209,9 @@ class Cell:
 
     flooded_step: int | None = None
     """The step the dam was flooded"""
+
+    def __post_init__(self):
+        self.id = self.edge.next_cell_id()
 
     @property
     def flooded(self) -> bool:
@@ -128,15 +242,13 @@ class Cell:
 class Dam:
     """A dam"""
 
-    _dam_counter: ClassVar[count] = count(1)
-
     cell: Cell
     """Which cell the dam is in"""
 
     created_step: int
     """The step the dam was created"""
 
-    id: int = field(default_factory=lambda: next(Dam._dam_counter))
+    id: int | None = None
     """Unique id for the dam"""
 
     meadow: bool = False
@@ -144,6 +256,9 @@ class Dam:
 
     broken_step: int | None = None
     """The step the dam was broken"""
+
+    def __post_init__(self):
+        self.id = self.cell.edge.next_dam_id()
 
     @property
     def broken(self) -> bool:
