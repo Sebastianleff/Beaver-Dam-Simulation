@@ -39,6 +39,25 @@ our own storage format. Recent-file paths that no longer exist on disk
 are pruned lazily -- at startup, and whenever clicking one fails --
 rather than proactively watched, since watching a list of files the
 user may never revisit isn't worth the complexity here.
+
+Step 24.2 also adds explicit window placement on startup (see
+_center_on_screen) rather than relying on the OS default position --
+on macOS in particular, a stale or multi-monitor position can land the
+window off-screen or on an inactive Space, which looks like the window
+is "hidden" even though it's technically running.
+
+Step 24.3 adds File > Export Network Image, for dropping a snapshot
+of the current network into documentation, a poster, etc. It renders
+NetworkEditor's underlying QGraphicsScene directly (just the nodes,
+edges, and cells), cropped to the content's bounding rect, rather than
+grabbing the whole editor widget -- the widget also includes the
+control panel, generate-network form, and menu bar, none of which
+belong in a documentation snapshot. If the editor is already open, the
+live self._editor.scene is rendered as-is (matching whatever's
+currently drawn, even if not yet synced back into network_data); if
+not, a NetworkEditor is instantiated off-screen purely to build a
+scene to render, then discarded. Either way this is read-only and
+never mutates network_data or network_file_path.
 """
 
 import sys
@@ -57,8 +76,8 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
 )
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtCore import QSettings
+from PySide6.QtGui import QAction, QKeySequence, QGuiApplication, QImage, QPainter
+from PySide6.QtCore import QSettings, QRectF, Qt
 
 # Relative import when this file is used as part of the `ui` package
 # (python -m ui.main_window, or `from ui.main_window import MainWindow`);
@@ -88,6 +107,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Beaver Dam Simulator")
         self.resize(720, 420)
+        self._center_on_screen()
 
         # Canonical current network, independent of whether the editor
         # is currently open. None means "nothing loaded yet" (distinct
@@ -123,6 +143,22 @@ class MainWindow(QMainWindow):
         self._refresh_status()
 
 
+    # Window placement
+
+    def _center_on_screen(self):
+        """Explicitly place the window on a visible screen instead of
+        trusting the OS default position -- on macOS a stale or
+        multi-monitor position can otherwise land the window off-screen
+        or on an inactive Space, making it look 'hidden'."""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        self.move(frame.topLeft())
+
+
     # UI
 
     def _build_menus(self):
@@ -142,6 +178,9 @@ class MainWindow(QMainWindow):
         save_as_action = QAction("Save Network &As...", self)
         save_as_action.triggered.connect(self.save_network_file_as)
 
+        export_image_action = QAction("Export Network &Image...", self)
+        export_image_action.triggered.connect(self.export_network_image)
+
         exit_action = QAction("E&xit", self)
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
@@ -153,6 +192,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(save_action)
         file_menu.addAction(save_as_action)
+        file_menu.addSeparator()
+        file_menu.addAction(export_image_action)
         file_menu.addSeparator()
         file_menu.addAction(exit_action)
 
@@ -436,6 +477,69 @@ class MainWindow(QMainWindow):
             return
         self._refresh_status()
         self._add_recent_file(path)
+
+    def export_network_image(self):
+        """Snapshot the current network to a PNG (Step 24.3). Useful
+        for docs, posters, etc. Renders NetworkEditor's QGraphicsScene
+        directly -- just nodes/edges/cells, cropped to their bounding
+        rect -- rather than grabbing the whole editor widget, which
+        would also capture the control panel and menu bar. Read-only:
+        never touches network_data or network_file_path."""
+        self._pull_latest_from_editor_if_open()
+
+        if self.network_data is None or not self.network_data.get("nodes"):
+            QMessageBox.information(
+                self, "Nothing to Export", "Build or load a network first (Open Network Editor)."
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Network Image", "", "PNG Image (*.png)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+
+        # If the editor is already open, render its live scene as-is
+        # (matching whatever's currently drawn, whether or not it's
+        # been synced back into self.network_data yet). Otherwise spin
+        # up a temporary, never-shown editor just to build a scene to
+        # render -- NetworkEditor already knows how to lay out
+        # nodes/edges, so reuse that instead of duplicating drawing
+        # logic here. The temporary instance never touches self._editor.
+        temp_editor = None
+        try:
+            if self._editor is not None:
+                scene = self._editor.scene
+            else:
+                temp_editor = NetworkEditor(initial_data=self.network_data)
+                scene = temp_editor.scene
+
+            content_rect = scene.itemsBoundingRect()
+            if content_rect.isEmpty():
+                QMessageBox.critical(self, "Error", "Network has no visible content to export.")
+                return
+
+            padding = 24
+            content_rect = content_rect.adjusted(-padding, -padding, padding, padding)
+
+            image = QImage(content_rect.size().toSize(), QImage.Format.Format_ARGB32)
+            image.fill(Qt.GlobalColor.white)
+
+            painter = QPainter(image)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            scene.render(painter, target=QRectF(image.rect()), source=content_rect)
+            painter.end()
+        finally:
+            if temp_editor is not None:
+                temp_editor.deleteLater()
+
+        if not image.save(path, "PNG"):
+            QMessageBox.critical(self, "Error", f"Could not save image to:\n{path}")
+            return
+
+        QMessageBox.information(self, "Exported", f"Network image saved to:\n{path}")
 
 
     # Summoning the Results Viewer
